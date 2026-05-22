@@ -216,3 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local OS/editor noise
+.DS_Store
+
+# Logs and runtime output
+logs/
+*.log
+
+# Python runtime/cache
+*.pyc
+
+# Generated audio/STT/TTS samples
+audio-samples/
+voice-gateway/audio-samples/
+*.raw
+
+# Local firmware inspection/build artifacts
+firmware/
+fw-inspect/

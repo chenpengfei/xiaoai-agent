@@ -1,0 +1,9 @@
+[project]
+name = "voice-gateway"
+version = "0.1.0"
+description = "Mac Mini side voice gateway for XiaoAI speaker experiments."
+requires-python = ">=3.9"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

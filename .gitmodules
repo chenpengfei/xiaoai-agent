@@ -1,0 +1,3 @@
+[submodule "open-xiaoai"]
+	path = open-xiaoai
+	url = https://github.com/idootop/open-xiaoai.git
