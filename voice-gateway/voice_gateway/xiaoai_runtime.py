@@ -19,7 +19,7 @@ from voice_gateway.config import EndpointingConfig, load_config_from_env
 from voice_gateway.dialogue.triggers import contains_wake_word
 from voice_gateway.hermes import EchoHermesConnector, OpenAICompatibleHermesConnector
 from voice_gateway.models import AudioChunk
-from voice_gateway.observability import JsonLineEventLogger
+from voice_gateway.observability import JsonLineEventLogger, start_metrics_server
 from voice_gateway.playback import EdgeTTSFileEngine, PlaybackManager, StaticTTSEngine
 
 DEFAULT_WAKE_ACK_TEXTS = ("我在", "在", "诶")
@@ -259,6 +259,14 @@ async def run_server(args: argparse.Namespace) -> int:
     open_xiaoai_server = _import_open_xiaoai_server(Path(args.xiaozhi_dir))
     config = load_config_from_env()
     events = JsonLineEventLogger()
+    metrics_server = None
+    if args.metrics:
+        metrics_server = start_metrics_server(host=args.metrics_host, port=args.metrics_port)
+        events.emit(
+            "metrics.server.started",
+            host=args.metrics_host,
+            port=args.metrics_port,
+        )
 
     wake_asr = _build_asr(args.static_wake_asr_text or args.static_asr_text, config)
     question_asr = _build_asr(args.static_question_asr_text or args.static_asr_text, config)
@@ -318,6 +326,8 @@ async def run_server(args: argparse.Namespace) -> int:
     for task in done:
         if task is server_task:
             await task
+    if metrics_server is not None:
+        metrics_server.shutdown()
     return 0
 
 
@@ -337,6 +347,14 @@ def parse_args() -> argparse.Namespace:
         default=float(os.getenv("VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS", "0.4")),
     )
     parser.add_argument("--probe", action="store_true", help="log record stream byte progress")
+    parser.add_argument(
+        "--metrics",
+        action=argparse.BooleanOptionalAction,
+        default=os.getenv("VOICE_GATEWAY_METRICS_ENABLED", "1") not in {"", "0", "false", "False"},
+        help="serve Prometheus-compatible metrics",
+    )
+    parser.add_argument("--metrics-host", default=os.getenv("VOICE_GATEWAY_METRICS_HOST", "127.0.0.1"))
+    parser.add_argument("--metrics-port", type=int, default=int(os.getenv("VOICE_GATEWAY_METRICS_PORT", "9109")))
     parser.add_argument("--energy-vad", action="store_true", help="use simple energy endpointing instead of Silero VAD")
     parser.add_argument("--static-asr-text", default="", help="dev override; skip real ASR and use this transcript")
     parser.add_argument("--static-wake-asr-text", default="", help="dev override for wake-word ASR only")

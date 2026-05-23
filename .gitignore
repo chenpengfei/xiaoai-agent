@@ -223,6 +223,8 @@ __marimo__/
 # Logs and runtime output
 logs/
 *.log
+voice-gateway/.ops-data/
+voice-gateway/ops/.env
 
 # Python runtime/cache
 *.pyc

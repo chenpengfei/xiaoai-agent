@@ -74,10 +74,16 @@ class MinimalLoopGatewayTest(unittest.IsolatedAsyncioTestCase):
         assert "playback.finished" in names
         hermes_started = next(event for event in events.events if event.event == "hermes.started")
         hermes_completed = next(event for event in events.events if event.event == "hermes.completed")
+        turn_completed = next(event for event in events.events if event.event == "turn.completed")
         assert hermes_started.fields["user_text"] == "你好你是谁"
         assert hermes_completed.fields["response_text"] == "我是小马。"
         assert hermes_completed.fields["should_speak"] is True
         assert hermes_completed.fields["model"] == "static"
+        assert turn_completed.fields["trace_id"]
+        assert turn_completed.fields["total_ms"] >= 0
+        assert turn_completed.fields["stage_ms"]["asr"] >= 0
+        assert turn_completed.fields["stage_ms"]["hermes"] >= 0
+        assert turn_completed.fields["slowest_stage"] in turn_completed.fields["stage_ms"]
 
     async def test_empty_asr_recovers_to_idle_without_hermes_or_playback(self):
         endpoint_config = EndpointingConfig(
@@ -114,6 +120,11 @@ class MinimalLoopGatewayTest(unittest.IsolatedAsyncioTestCase):
         assert gateway.state == DialogueState.IDLE
         assert hermes.turns == []
         assert device.played == []
+        turn_failed = next(event for event in events.events if event.event == "turn.failed")
+        assert turn_failed.fields["failed_stage"] == "asr"
+        assert turn_failed.fields["failure_reason"] == "empty_asr"
+        assert turn_failed.fields["last_successful_stage"] == "asr"
+        assert turn_failed.fields["stage_ms"]["asr"] >= 0
 
     async def test_empty_trigger_question_prompts_locally_without_hermes(self):
         endpoint_config = EndpointingConfig(

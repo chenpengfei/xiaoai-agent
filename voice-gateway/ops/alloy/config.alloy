@@ -1,0 +1,93 @@
+logging {
+  level = "info"
+}
+
+loki.source.file "voice_gateway_logs" {
+  targets = [
+    {
+      __path__ = "/var/log/voice-gateway/events.jsonl",
+      service  = "voice-gateway",
+      env      = "home",
+      log_type = "events",
+      device_id = "xiaoai-speaker",
+    },
+    {
+      __path__ = "/var/log/voice-gateway/runtime.log",
+      service  = "voice-gateway",
+      env      = "home",
+      log_type = "runtime",
+      device_id = "xiaoai-speaker",
+    },
+    {
+      __path__ = "/var/log/voice-gateway/audit.jsonl",
+      service  = "voice-gateway",
+      env      = "home",
+      log_type = "audit",
+      device_id = "xiaoai-speaker",
+    },
+    {
+      __path__ = "/var/log/voice-gateway/voice-gateway-minimal.log",
+      service  = "voice-gateway",
+      env      = "home",
+      log_type = "minimal",
+      device_id = "xiaoai-speaker",
+    },
+  ]
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+prometheus.scrape "voice_gateway" {
+  targets = [
+    {
+      __address__ = "host.docker.internal:9109",
+      job         = "voice-gateway",
+      service     = "voice-gateway",
+      env         = "home",
+    },
+  ]
+
+  metrics_path = "/metrics"
+  forward_to   = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}
+
+otelcol.receiver.otlp "voice_gateway" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.voice_gateway.input]
+  }
+}
+
+otelcol.processor.batch "voice_gateway" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

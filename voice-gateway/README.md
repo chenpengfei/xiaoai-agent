@@ -6,7 +6,7 @@
 
 正式设计方案：
 
-- [DESIGN.md](./DESIGN.md)
+- [Voice Gateway 总设计](./docs/3-design/DESIGN.md)
 
 分阶段设计：
 
@@ -16,8 +16,12 @@
 - [04 自然打断](./docs/3-design/04-barge-in.md)
 - [05 声纹识别](./docs/3-design/05-speaker-identity.md)
 - [06 TTS 与播放控制](./docs/3-design/06-tts-playback.md)
-- [07 可观测性](./docs/3-design/07-observability.md)
-- [08 安全与隐私](./docs/3-design/08-security-privacy.md)
+- [07 安全与隐私](./docs/3-design/07-security-privacy.md)
+
+运维设计：
+
+- [4 Ops 运维设计](./docs/4-ops/README.md)
+- [可观测性总设计](./docs/4-ops/01-observability.md)
 
 ## 当前实现状态
 

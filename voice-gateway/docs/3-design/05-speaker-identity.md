@@ -4,7 +4,7 @@
 
 上级索引：[Voice Gateway 总设计](./DESIGN.md)  
 前置文档：[03 连续对话](./03-continuous-conversation.md)  
-相关文档：[08 安全与隐私](./08-security-privacy.md)
+相关文档：[07 安全与隐私](./07-security-privacy.md)
 
 ## 1. 阶段目标
 
@@ -113,4 +113,4 @@ speaker: SpeakerIdentity
 - 最小闭环不依赖声纹：[02 最小闭环](./02-minimal-loop.md)
 - 连续对话可以先没有声纹：[03 连续对话](./03-continuous-conversation.md)
 - 自然打断可使用声纹降低误触发：[04 自然打断](./04-barge-in.md)
-- 声纹隐私策略见 [08 安全与隐私](./08-security-privacy.md)
+- 声纹隐私策略见 [07 安全与隐私](./07-security-privacy.md)

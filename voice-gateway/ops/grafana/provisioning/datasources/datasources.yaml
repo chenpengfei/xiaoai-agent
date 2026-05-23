@@ -1,0 +1,35 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: true
+    jsonData:
+      derivedFields:
+        - name: trace_id
+          matcherRegex: '"trace_id":"([^"]+)"'
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+    uid: loki
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    uid: tempo
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        filterByTraceID: true
+        customQuery: true
+        query: '{service="voice-gateway", log_type="events"} | json | trace_id="$${__trace.traceId}"'
+
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    uid: prometheus

@@ -1,0 +1,484 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: voice-gateway
+    folder: Voice Gateway
+    interval: 1m
+    rules:
+      - uid: voice-gateway-down
+        title: Voice Gateway down
+        condition: C
+        for: 1m
+        labels:
+          severity: P1
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "voice-gateway metrics are absent."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#1-voice-gateway-进程不可用"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              expr: "absent(voice_gateway_up)"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-audio-stale
+        title: Voice Gateway audio stream stale
+        condition: C
+        for: 2m
+        labels:
+          severity: P1
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "Audio stream has not advanced recently."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#2-音频流中断"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              expr: "voice_gateway_audio_chunk_total > 0 and voice_gateway_audio_last_seen_age_seconds > 120"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-turn-failures
+        title: Voice Gateway turn failures
+        condition: C
+        for: 1m
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "Recent voice turns are failing."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: A
+              expr: "increase(voice_gateway_turn_failure_total[10m])"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [2]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-hermes-failures
+        title: Voice Gateway Hermes failures
+        condition: C
+        for: 1m
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "Hermes calls are failing repeatedly."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#3-hermes-持续失败"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: A
+              expr: "increase(voice_gateway_hermes_failure_total[10m])"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [2]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-tts-failures
+        title: Voice Gateway TTS failures
+        condition: C
+        for: 1m
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "TTS generation is failing repeatedly."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#4-tts-生成失败"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: A
+              expr: "increase(voice_gateway_tts_failure_total[10m])"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [2]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-playback-failures
+        title: Voice Gateway playback failures
+        condition: C
+        for: 1m
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "Playback commands are failing repeatedly."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#5-播放失败"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: A
+              expr: "increase(voice_gateway_playback_failure_total[10m])"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [2]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-turn-slow
+        title: Voice Gateway turn latency high
+        condition: C
+        for: 3m
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "Voice turn p95 latency is above 15 seconds."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: A
+              expr: "voice_gateway_turn_duration_ms{quantile=\"0.95\"}"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [15000]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-hermes-slow
+        title: Voice Gateway Hermes latency high
+        condition: C
+        for: 3m
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "Hermes p95 latency is above 10 seconds."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#3-hermes-持续失败"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: A
+              expr: "voice_gateway_turn_stage_duration_ms{stage=\"hermes\",quantile=\"0.95\"}"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 900
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [10000]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-event-log-stale
+        title: Voice Gateway event log stale
+        condition: C
+        for: 2m
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "Structured event log has not advanced recently."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              expr: "voice_gateway_events_total > 0 and voice_gateway_event_log_last_write_age_seconds > 120"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query

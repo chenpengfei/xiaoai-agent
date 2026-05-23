@@ -7,6 +7,7 @@ PROJECT_ROOT="$(cd "$VOICE_GATEWAY_DIR/.." && pwd)"
 XIAOZHI_DIR="$PROJECT_ROOT/open-xiaoai/examples/xiaozhi"
 LOG_DIR="$VOICE_GATEWAY_DIR/logs"
 LOG_FILE="$LOG_DIR/voice-gateway-minimal.log"
+EVENTS_LOG_FILE="$LOG_DIR/events.jsonl"
 
 # 补充本机常用可执行文件路径，确保 uv、edge-tts 等命令能被脚本直接找到。
 export PATH="/Users/chenpengfei/.local/bin:/opt/homebrew/bin:$PATH"
@@ -47,6 +48,15 @@ export VOICE_GATEWAY_SILERO_MIN_SPEECH="${VOICE_GATEWAY_SILERO_MIN_SPEECH:-0.12}
 export VOICE_GATEWAY_VAD_GAIN_DB="${VOICE_GATEWAY_VAD_GAIN_DB:-30}"
 # 是否抑制底层音频分片日志，1 表示减少噪声日志输出。
 export VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS="${VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS:-1}"
+# 结构化事件 JSONL 输出路径，用于 Loki / Grafana 查询和指标派生。
+export VOICE_GATEWAY_EVENTS_LOG_FILE="${VOICE_GATEWAY_EVENTS_LOG_FILE:-$EVENTS_LOG_FILE}"
+# Prometheus-compatible metrics endpoint，供 ops stack 抓取。
+export VOICE_GATEWAY_METRICS_ENABLED="${VOICE_GATEWAY_METRICS_ENABLED:-1}"
+export VOICE_GATEWAY_METRICS_HOST="${VOICE_GATEWAY_METRICS_HOST:-127.0.0.1}"
+export VOICE_GATEWAY_METRICS_PORT="${VOICE_GATEWAY_METRICS_PORT:-9109}"
+# OpenTelemetry trace 导出到 Alloy OTLP HTTP receiver。未安装 OTel 依赖时自动降级为日志 trace_id/span_id。
+export VOICE_GATEWAY_OTEL_ENABLED="${VOICE_GATEWAY_OTEL_ENABLED:-1}"
+export VOICE_GATEWAY_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="${VOICE_GATEWAY_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://127.0.0.1:4318/v1/traces}"
 # 音频探测日志的字节间隔，用于观察持续采集是否仍在工作。
 export VOICE_GATEWAY_PROBE_INTERVAL_BYTES="${VOICE_GATEWAY_PROBE_INTERVAL_BYTES:-160000}"
 # VAD 命中语音前保留的预卷音频时长，避免切掉句首，单位为秒。
@@ -104,6 +114,9 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] starting voice-gateway minimal XiaoAI runti
 echo "voice_gateway: $VOICE_GATEWAY_DIR"
 echo "xiaozhi_dir: $XIAOZHI_DIR"
 echo "log: $LOG_FILE"
+echo "events_log: $VOICE_GATEWAY_EVENTS_LOG_FILE"
+echo "metrics: http://$VOICE_GATEWAY_METRICS_HOST:$VOICE_GATEWAY_METRICS_PORT/metrics"
+echo "otel_traces: $VOICE_GATEWAY_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 echo "wake_word: $VOICE_GATEWAY_WAKE_WORD"
 echo "route: wake word -> random speaker text ack -> next utterance as Hermes question"
 echo "openai_base_url: $VOICE_GATEWAY_OPENAI_BASE_URL"

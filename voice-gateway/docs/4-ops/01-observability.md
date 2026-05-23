@@ -1,9 +1,9 @@
-# 07 可观测性
+# 01 可观测性总设计
 
 本文定义 `voice-gateway` 的日志事件、指标、trace 和故障诊断原则。
 
-上级索引：[Voice Gateway 总设计](./DESIGN.md)  
-相关文档：[01 架构与模块边界](./01-architecture.md)
+上级索引：[4 Ops 运维设计](./README.md)  
+相关文档：[Voice Gateway 总设计](../3-design/DESIGN.md)、[01 架构与模块边界](../3-design/01-architecture.md)
 
 ## 1. 阶段目标
 
@@ -30,24 +30,31 @@
 - turn：用户的一轮输入和助手的一轮回答。
 - playback：一次播放会话。
 - model call：ASR、声纹、Hermes、TTS 调用。
+- runtime：Mac Mini 进程、队列、依赖服务和本机资源。
 
 建议统一使用这些 ID：
 
 ```text
+trace_id
+span_id
 device_id
 session_id
 conversation_id
 turn_id
 playback_id
 stream_id
+request_id
 ```
 
 其中：
 
+- `trace_id` 用于一次端到端链路追踪，最小单位建议是一轮 voice turn。
+- `span_id` 用于 trace 中的单个环节，例如 ASR、Hermes、TTS 或 playback。
 - `session_id` 用于一次从唤醒到结束的请求追踪。
 - `conversation_id` 用于多轮连续对话。
 - `turn_id` 用于一轮用户输入。
 - `playback_id` 用于一次回答播放。
+- `request_id` 用于外部 HTTP / model 调用，尤其是 Hermes、ASR 或 TTS 服务端返回的请求编号。
 
 ## 3. 结构化事件
 
@@ -66,6 +73,7 @@ stream_id
 - 播放生命周期。
 - 打断判断。
 - 错误恢复。
+- 运行时健康检查。
 
 示例：
 
@@ -82,15 +90,22 @@ stream_id
 }
 ```
 
+事件命名应稳定，避免把临时调试文本变成下游依赖。
+
 ## 4. 关键事件
 
 建议优先实现这些事件：
 
 ```text
+runtime.started
+runtime.ready
+runtime.worker.failed
+runtime.state_changed
 device.connected
 device.disconnected
 audio.chunk.received
 audio.stream.gap
+audio.stream.silent
 vad.speech_started
 vad.speech_ended
 asr.started
@@ -108,28 +123,40 @@ playback.started
 playback.finished
 playback.stopped
 playback.failed
+turn.completed
+turn.failed
 barge_in.candidate
 barge_in.confirmed
 error.recovered
+health.check
 ```
 
-事件命名应稳定，避免把临时调试文本变成下游依赖。
+当前最小闭环已经有 `JsonLineEventLogger`，并已经输出 `wakeup.detected`、`audio.chunk.received`、`vad.speech_started`、`vad.speech_ended`、`asr.started`、`asr.completed`、`hermes.started`、`hermes.completed`、`tts.started`、`tts.completed`、`playback.started`、`playback.finished`、`runtime.state_changed` 和 `error.recovered` 等事件。后续演进应优先补齐失败事件和健康检查事件。
 
 ## 5. 指标
 
 建议记录：
 
 ```text
+process.uptime_seconds
+runtime.queue.depth
+runtime.worker.failure_count
+device.connected
 audio.chunk.bytes
 audio.chunk.gap_ms
+audio.stream.last_seen_age_seconds
 vad.speech_probability
 vad.endpoint_latency_ms
 asr.latency_ms
+asr.empty_count
 speaker_identity.latency_ms
 hermes.latency_ms
+hermes.failure_count
 tts.latency_ms
+tts.failure_count
 playback.start_latency_ms
 playback.duration_ms
+playback.failure_count
 dialogue.turn.total_ms
 dialogue.turn.count
 barge_in.count
@@ -143,9 +170,36 @@ error.count
 - 端到端响应是否够快。
 - 哪个模块是当前瓶颈。
 
+指标应从结构化事件派生。事件日志是事实来源，监控指标是便于聚合和告警的投影。
+
 ## 6. Trace
 
-每一轮请求应能串起完整 trace：
+最终链路定位应优先通过 trace 查看。日志负责解释细节，指标负责发现趋势，trace 负责回答“这一轮请求断在哪个环节”。
+
+```text
+metric
+  -> 发现系统不健康，例如 hermes p95 变慢
+
+trace
+  -> 定位单次请求卡在 asr / hermes / tts / playback 哪一段
+
+log
+  -> 解释该 span 失败的具体原因和恢复动作
+```
+
+每一轮 `turn_id` 应能对应一条端到端 trace：
+
+```text
+voice.turn
+  audio_ingest
+  vad_endpointing
+  asr
+  hermes
+  tts
+  playback
+```
+
+早期事件线可以串起：
 
 ```text
 WakeupDetected
@@ -158,6 +212,8 @@ WakeupDetected
   -> PlaybackFinished
 ```
 
+长期应使用 OpenTelemetry SDK 创建 span，并通过 Grafana Alloy 上报到 Grafana Tempo。`trace_id`、`span_id`、`turn_id` 和 `conversation_id` 必须写入结构化日志，便于在 Grafana 中从 trace 跳到 Loki 日志。
+
 连续对话阶段，多个 `turn_id` 应归属于同一个 `conversation_id`。
 
 自然打断阶段，旧 `playback_id` 被停止后，新一轮 `turn_id` 应该能清楚关联到 `barge_in.confirmed`。
@@ -166,6 +222,7 @@ WakeupDetected
 
 预期故障：
 
+- voice-gateway 进程退出或卡死。
 - 音箱 WebSocket 断开。
 - 音频块停止到达。
 - 音频块间隔异常。
@@ -175,6 +232,7 @@ WakeupDetected
 - TTS 生成失败。
 - 播放命令失败。
 - 打断后旧播放事件迟到。
+- 日志文件过大或磁盘空间不足。
 
 处理原则：
 
@@ -184,15 +242,59 @@ WakeupDetected
 - 连续空 ASR 应回到 `IDLE`。
 - 打断时必须取消旧 TTS、旧播放和过期 Hermes 响应。
 - 断线重连后清理旧 conversation 的播放和监听状态。
+- 日志写入失败不能阻塞主链路，至少保留 stderr 降级输出。
+
+每轮请求结束时应输出总结事件：
+
+```text
+turn.completed
+turn.failed
+```
+
+失败时必须带：
+
+```text
+failed_stage
+failure_reason
+last_successful_stage
+trace_id
+turn_id
+conversation_id
+```
+
+完成和失败事件都应带阶段耗时摘要：
+
+```json
+{
+  "event": "turn.completed",
+  "total_ms": 18200,
+  "stage_ms": {
+    "audio_ingest": 200,
+    "vad_endpointing": 800,
+    "asr": 1100,
+    "hermes": 14500,
+    "tts": 1200,
+    "playback": 400
+  },
+  "slowest_stage": "hermes"
+}
+```
+
+这样即使暂时没有打开 Tempo trace，也能在 Loki 中直接查到断点和最慢环节。
 
 ## 8. 验收标准
 
 本阶段完成标准：
 
 - 每一轮语音请求都有 `session_id` 或 `conversation_id`。
+- 每一轮语音请求都有可关联的 `trace_id` 和 `turn_id`。
 - 关键状态转移都有结构化事件。
 - ASR、Hermes、TTS、播放都有耗时指标。
+- ASR、Hermes、TTS、播放都有对应 trace span。
+- `turn.completed` / `turn.failed` 中有 `stage_ms` 和 `slowest_stage`。
 - 音频流中断或卡顿可以从日志中定位。
 - 打断可以看到 candidate、confirmed、playback stopped 的完整链路。
 - 常见失败可以定位到具体模块。
+- 每轮失败都有 `turn.failed` 或 root span 上的 `failed_stage`。
 - 失败恢复后能看到明确的 `error.recovered` 或等价事件。
+- 运维告警可以关联到具体日志查询和 runbook。

@@ -13,6 +13,7 @@ from voice_gateway.adapters.base import DeviceController, InMemoryDeviceControll
 from voice_gateway.config import TTSConfig
 from voice_gateway.models import PlaybackResource
 from voice_gateway.observability.events import EventLogger, JsonLineEventLogger
+from voice_gateway.observability.tracing import SpanHandle, TraceManager
 
 
 class TTSEngine(Protocol):
@@ -88,42 +89,98 @@ class PlaybackManager:
         self.device = device or InMemoryDeviceController()
         self.events = events
 
-    async def speak(self, text: str, *, device_id: str, conversation_id: str, turn_id: str) -> PlaybackResource:
-        self.events.emit("tts.started", device_id=device_id, conversation_id=conversation_id, turn_id=turn_id)
+    async def speak(
+        self,
+        text: str,
+        *,
+        device_id: str,
+        conversation_id: str,
+        turn_id: str,
+        trace_id: str | None = None,
+        timings_ms: Optional[dict[str, int]] = None,
+        tracing: TraceManager | None = None,
+        parent_span: SpanHandle | None = None,
+    ) -> PlaybackResource:
+        event_fields = {
+            "device_id": device_id,
+            "conversation_id": conversation_id,
+            "turn_id": turn_id,
+            "trace_id": trace_id,
+        }
+        tts_span = tracing.start_child_span("tts", parent_span, event_fields) if tracing is not None else None
+        tts_span_id = tts_span.span_id if tts_span is not None else _new_span_id()
+        self.events.emit("tts.started", span_id=tts_span_id, **event_fields)
         started = time.perf_counter()
-        resource = await self.tts.synthesize_file(text)
+        try:
+            resource = await self.tts.synthesize_file(text)
+        except Exception as exc:
+            if tts_span is not None:
+                tts_span.set_error(exc)
+                tts_span.end()
+            self.events.emit(
+                "tts.failed",
+                span_id=tts_span_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+                **event_fields,
+            )
+            raise
+        tts_latency_ms = round((time.perf_counter() - started) * 1000)
+        if timings_ms is not None:
+            timings_ms["tts"] = tts_latency_ms
+        if tts_span is not None:
+            tts_span.set_attribute("duration_ms", tts_latency_ms)
+            tts_span.set_attribute("playback_id", resource.playback_id)
+            tts_span.end()
         self.events.emit(
             "tts.completed",
-            device_id=device_id,
-            conversation_id=conversation_id,
-            turn_id=turn_id,
+            span_id=tts_span_id,
+            **event_fields,
             playback_id=resource.playback_id,
-            latency_ms=round((time.perf_counter() - started) * 1000),
+            latency_ms=tts_latency_ms,
         )
 
+        playback_span = tracing.start_child_span("playback", parent_span, event_fields) if tracing is not None else None
+        playback_span_id = playback_span.span_id if playback_span is not None else _new_span_id()
         self.events.emit(
             "playback.started",
-            device_id=device_id,
-            conversation_id=conversation_id,
-            turn_id=turn_id,
+            span_id=playback_span_id,
+            **event_fields,
             playback_id=resource.playback_id,
             url=resource.url,
         )
+        started = time.perf_counter()
         ok = await self.device.play_audio_resource(resource)
+        playback_latency_ms = round((time.perf_counter() - started) * 1000)
+        if timings_ms is not None:
+            timings_ms["playback"] = playback_latency_ms
         if not ok:
+            if playback_span is not None:
+                playback_span.set_attribute("duration_ms", playback_latency_ms)
+                playback_span.set_attribute("playback_id", resource.playback_id)
+                playback_span.set_error("device rejected playback resource")
+                playback_span.end()
             self.events.emit(
                 "playback.failed",
-                device_id=device_id,
-                conversation_id=conversation_id,
-                turn_id=turn_id,
+                span_id=playback_span_id,
+                **event_fields,
                 playback_id=resource.playback_id,
+                latency_ms=playback_latency_ms,
             )
             raise RuntimeError("device rejected playback resource")
+        if playback_span is not None:
+            playback_span.set_attribute("duration_ms", playback_latency_ms)
+            playback_span.set_attribute("playback_id", resource.playback_id)
+            playback_span.end()
         self.events.emit(
             "playback.finished",
-            device_id=device_id,
-            conversation_id=conversation_id,
-            turn_id=turn_id,
+            span_id=playback_span_id,
+            **event_fields,
             playback_id=resource.playback_id,
+            latency_ms=playback_latency_ms,
         )
         return resource
+
+
+def _new_span_id() -> str:
+    return uuid.uuid4().hex[:16]

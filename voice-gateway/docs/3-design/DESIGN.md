@@ -36,8 +36,8 @@
 4. [04 自然打断](./04-barge-in.md)
 5. [05 声纹识别](./05-speaker-identity.md)
 6. [06 TTS 与播放控制](./06-tts-playback.md)
-7. [07 可观测性](./07-observability.md)
-8. [08 安全与隐私](./08-security-privacy.md)
+7. [07 安全与隐私](./07-security-privacy.md)
+8. [运维设计：可观测性、日志、监控与告警](../4-ops/README.md)
 
 ## 3. 阶段关系
 
@@ -60,11 +60,11 @@
 06 TTS 与播放控制
   -> 设计 gateway 管理的 TTS、播放生命周期、取消、打断和播放参考音频
 
-07 可观测性
-  -> 定义结构化事件、指标、trace 和故障诊断策略
-
-08 安全与隐私
+07 安全与隐私
   -> 定义网络边界、设备认证、权限策略和隐私保护原则
+
+4 Ops 运维设计
+  -> 定义结构化事件、日志、指标、trace、告警和故障诊断策略
 ```
 
 ## 4. 总体模块
@@ -88,38 +88,47 @@ voice-gateway
 ## 5. 目标目录结构
 
 ```text
-voice-gateway/
-  README.md
-  DESIGN.md
-  docs/
-    roadmap.md
-    1-idea/
-    2-poc/
-      knowledge/
-    3-design/
-      DESIGN.md
-      01-architecture.md
-      02-minimal-loop.md
-      03-continuous-conversation.md
-      04-barge-in.md
-      05-speaker-identity.md
-      06-tts-playback.md
-      07-observability.md
-      08-security-privacy.md
-  pyproject.toml
-  voice_gateway/
-    __init__.py
-    app.py
-    config.py
-    adapters/
-    audio/
-    asr/
-    identity/
-    dialogue/
-    hermes/
-    playback/
-    observability/
-  tests/
+xiaoai-agent/
+  voice-gateway/
+    README.md
+    docs/
+      README.md
+      roadmap.md
+      1-idea/
+      2-poc/
+        knowledge/
+      3-design/
+        DESIGN.md
+        01-architecture.md
+        02-minimal-loop.md
+        03-continuous-conversation.md
+        04-barge-in.md
+        05-speaker-identity.md
+        06-tts-playback.md
+        07-security-privacy.md
+      4-ops/
+        README.md
+        01-observability.md
+        02-logging.md
+        03-metrics.md
+        04-tracing.md
+        05-alerting.md
+        06-grafana-loki-tempo-alloy.md
+        07-ops-runbook.md
+    pyproject.toml
+    voice_gateway/
+      __init__.py
+      app.py
+      config.py
+      adapters/
+      audio/
+      asr/
+      identity/
+      dialogue/
+      hermes/
+      playback/
+      observability/
+    tests/
 ```
 
 ## 6. 设计原则

@@ -16,6 +16,7 @@ from voice_gateway.hermes.base import EchoHermesConnector, HermesConnector
 from voice_gateway.hermes.openai_compatible import OpenAICompatibleHermesConnector
 from voice_gateway.models import ASRResult, AudioChunk, DialogueState, HermesResponse, HermesTurn, Turn
 from voice_gateway.observability.events import EventLogger, JsonLineEventLogger
+from voice_gateway.observability.tracing import SpanHandle, TraceManager
 from voice_gateway.playback.base import EdgeTTSFileEngine, PlaybackManager, StaticTTSEngine
 
 
@@ -32,6 +33,7 @@ class MinimalLoopGateway:
         endpoint: Optional[EnergyEndpointDetector] = None,
         events: EventLogger = JsonLineEventLogger(),
         asr_text_transform: Optional[Callable[[ASRResult], Optional[str]]] = None,
+        tracing: Optional[TraceManager] = None,
     ) -> None:
         self.device_id = device_id
         self.asr = asr
@@ -43,6 +45,10 @@ class MinimalLoopGateway:
         self.asr_text_transform = asr_text_transform
         self.conversation_id: Optional[str] = None
         self.turn_id: Optional[str] = None
+        self.trace_id: Optional[str] = None
+        self._root_span_id: Optional[str] = None
+        self._root_span: Optional[SpanHandle] = None
+        self.tracing = tracing or TraceManager.from_env()
 
     @property
     def state(self) -> DialogueState:
@@ -54,6 +60,16 @@ class MinimalLoopGateway:
             return
         self.conversation_id = f"c_{uuid.uuid4().hex}"
         self.turn_id = f"t_{uuid.uuid4().hex}"
+        self._root_span = self.tracing.start_root_span(
+            "voice.turn",
+            {
+                "device_id": self.device_id,
+                "conversation_id": self.conversation_id,
+                "turn_id": self.turn_id,
+            },
+        )
+        self.trace_id = self._root_span.trace_id
+        self._root_span_id = self._root_span.span_id
         self.endpoint.reset()
         await self.asr.reset()
         self.events.emit(
@@ -61,6 +77,8 @@ class MinimalLoopGateway:
             device_id=self.device_id,
             conversation_id=self.conversation_id,
             turn_id=self.turn_id,
+            trace_id=self.trace_id,
+            span_id=self._root_span_id,
         )
         self.dialogue.transition(
             DialogueState.LISTENING,
@@ -68,6 +86,8 @@ class MinimalLoopGateway:
             device_id=self.device_id,
             conversation_id=self.conversation_id,
             turn_id=self.turn_id,
+            trace_id=self.trace_id,
+            span_id=self._root_span_id,
         )
 
     async def accept_audio(self, chunk: AudioChunk) -> Optional[Turn]:
@@ -79,6 +99,8 @@ class MinimalLoopGateway:
             device_id=chunk.device_id,
             conversation_id=self.conversation_id,
             turn_id=self.turn_id,
+            trace_id=self.trace_id,
+            span_id=self._root_span_id,
             seq=chunk.seq,
             bytes=len(chunk.pcm),
         )
@@ -91,6 +113,8 @@ class MinimalLoopGateway:
                     device_id=chunk.device_id,
                     conversation_id=self.conversation_id,
                     turn_id=self.turn_id,
+                    trace_id=self.trace_id,
+                    span_id=self._root_span_id,
                     timestamp_ms=event.timestamp_ms,
                 )
                 self.dialogue.transition(
@@ -99,6 +123,8 @@ class MinimalLoopGateway:
                     device_id=chunk.device_id,
                     conversation_id=self.conversation_id,
                     turn_id=self.turn_id,
+                    trace_id=self.trace_id,
+                    span_id=self._root_span_id,
                 )
             if event.kind == "speech_ended" and event.window is not None:
                 self.events.emit(
@@ -106,6 +132,8 @@ class MinimalLoopGateway:
                     device_id=chunk.device_id,
                     conversation_id=self.conversation_id,
                     turn_id=self.turn_id,
+                    trace_id=self.trace_id,
+                    span_id=self._root_span_id,
                     audio_ms=event.window.duration_ms,
                 )
                 return await self._complete_turn(event.window)
@@ -121,9 +149,16 @@ class MinimalLoopGateway:
                 device_id=self.device_id,
                 conversation_id=self.conversation_id,
                 turn_id=self.turn_id,
+                trace_id=self.trace_id,
+                span_id=self._root_span_id,
             )
             self.conversation_id = None
             self.turn_id = None
+            self.trace_id = None
+            self._root_span_id = None
+            if self._root_span is not None:
+                self._root_span.end()
+            self._root_span = None
 
     async def recover_to_idle(self, *, reason: str, error: str) -> None:
         self.events.emit(
@@ -131,6 +166,8 @@ class MinimalLoopGateway:
             device_id=self.device_id,
             conversation_id=self.conversation_id,
             turn_id=self.turn_id,
+            trace_id=self.trace_id,
+            span_id=self._root_span_id,
             reason=reason,
             error=error,
             state=self.dialogue.state.value,
@@ -144,13 +181,36 @@ class MinimalLoopGateway:
                 device_id=self.device_id,
                 conversation_id=self.conversation_id,
                 turn_id=self.turn_id,
+                trace_id=self.trace_id,
+                span_id=self._root_span_id,
             )
         self.conversation_id = None
         self.turn_id = None
+        self.trace_id = None
+        self._root_span_id = None
+        if self._root_span is not None:
+            self._root_span.set_error(error)
+            self._root_span.end()
+        self._root_span = None
 
     async def _complete_turn(self, window) -> Turn:
         conversation_id = self.conversation_id or f"c_{uuid.uuid4().hex}"
         turn_id = self.turn_id or f"t_{uuid.uuid4().hex}"
+        trace_id = self.trace_id or uuid.uuid4().hex
+        root_span = self._root_span or self.tracing.start_root_span(
+            "voice.turn",
+            {
+                "device_id": window.device_id,
+                "conversation_id": conversation_id,
+                "turn_id": turn_id,
+            },
+        )
+        root_span_id = root_span.span_id
+        trace_id = root_span.trace_id
+        turn_started = time.perf_counter()
+        failed_stage: Optional[str] = None
+        failure_reason: Optional[str] = None
+        last_successful_stage: Optional[str] = None
         turn = Turn(
             turn_id=turn_id,
             conversation_id=conversation_id,
@@ -166,16 +226,49 @@ class MinimalLoopGateway:
                 device_id=window.device_id,
                 conversation_id=conversation_id,
                 turn_id=turn_id,
+                trace_id=trace_id,
+                span_id=root_span_id,
             )
             started = time.perf_counter()
-            self.events.emit("asr.started", device_id=window.device_id, conversation_id=conversation_id, turn_id=turn_id)
-            turn.asr = await self.asr.transcribe_final(window)
+            asr_span = self.tracing.start_child_span(
+                "asr",
+                root_span,
+                {
+                    "device_id": window.device_id,
+                    "conversation_id": conversation_id,
+                    "turn_id": turn_id,
+                },
+            )
+            asr_span_id = asr_span.span_id
+            self.events.emit(
+                "asr.started",
+                device_id=window.device_id,
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                trace_id=trace_id,
+                span_id=asr_span_id,
+            )
+            failed_stage = "asr"
+            try:
+                turn.asr = await self.asr.transcribe_final(window)
+            except Exception as exc:
+                asr_span.set_error(exc)
+                asr_span.end()
+                raise
             turn.timings_ms["asr"] = round((time.perf_counter() - started) * 1000)
+            asr_span.set_attribute("duration_ms", turn.timings_ms["asr"])
+            asr_span.set_attribute("asr.engine", turn.asr.engine)
+            asr_span.set_attribute("asr.text_length", len(turn.asr.normalized_text or turn.asr.text or ""))
+            asr_span.set_attribute("asr.empty", not bool(turn.asr.normalized_text))
+            asr_span.end()
+            last_successful_stage = "asr"
             self.events.emit(
                 "asr.completed",
                 device_id=window.device_id,
                 conversation_id=conversation_id,
                 turn_id=turn_id,
+                trace_id=trace_id,
+                span_id=asr_span_id,
                 text=turn.asr.text,
                 normalized_text=turn.asr.normalized_text,
                 latency_ms=turn.timings_ms["asr"],
@@ -183,12 +276,17 @@ class MinimalLoopGateway:
             if not turn.asr.normalized_text:
                 turn.state = "failed"
                 turn.error = "empty_asr"
+                failure_reason = "empty_asr"
+                root_span.set_attribute("failed_stage", "asr")
+                root_span.set_attribute("failure_reason", "empty_asr")
                 self.dialogue.transition(
                     DialogueState.IDLE,
                     reason="asr_empty",
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    span_id=root_span_id,
                 )
                 return turn
 
@@ -202,6 +300,8 @@ class MinimalLoopGateway:
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    span_id=root_span_id,
                     text=turn.asr.text,
                     normalized_text=turn.asr.normalized_text,
                 )
@@ -213,6 +313,8 @@ class MinimalLoopGateway:
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    span_id=root_span_id,
                     text=turn.asr.text,
                     normalized_text=turn.asr.normalized_text,
                 )
@@ -222,41 +324,73 @@ class MinimalLoopGateway:
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    span_id=root_span_id,
                 )
                 started = time.perf_counter()
                 turn.hermes_response = HermesResponse(text=prompt, should_speak=True, model="local-prompt")
+                failed_stage = "tts_playback"
                 turn.playback_resource = await self.playback.speak(
                     prompt,
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    timings_ms=turn.timings_ms,
+                    tracing=self.tracing,
+                    parent_span=root_span,
                 )
-                turn.timings_ms["playback"] = round((time.perf_counter() - started) * 1000)
+                turn.timings_ms["tts_playback_total"] = round((time.perf_counter() - started) * 1000)
                 turn.state = "played"
                 return turn
 
             started = time.perf_counter()
+            hermes_span = self.tracing.start_child_span(
+                "hermes",
+                root_span,
+                {
+                    "device_id": window.device_id,
+                    "conversation_id": conversation_id,
+                    "turn_id": turn_id,
+                    "hermes.model": getattr(self.hermes, "model", None),
+                },
+            )
+            hermes_span_id = hermes_span.span_id
             self.events.emit(
                 "hermes.started",
                 device_id=window.device_id,
                 conversation_id=conversation_id,
                 turn_id=turn_id,
+                trace_id=trace_id,
+                span_id=hermes_span_id,
                 user_text=user_text,
             )
-            turn.hermes_response = await self.hermes.ask(
-                HermesTurn(
-                    conversation_id=conversation_id,
-                    user_text=user_text,
-                    speaker=None,
-                    history=(),
+            failed_stage = "hermes"
+            try:
+                turn.hermes_response = await self.hermes.ask(
+                    HermesTurn(
+                        conversation_id=conversation_id,
+                        user_text=user_text,
+                        speaker=None,
+                        history=(),
+                    )
                 )
-            )
+            except Exception as exc:
+                hermes_span.set_error(exc)
+                hermes_span.end()
+                raise
             turn.timings_ms["hermes"] = round((time.perf_counter() - started) * 1000)
+            hermes_span.set_attribute("duration_ms", turn.timings_ms["hermes"])
+            hermes_span.set_attribute("hermes.model", turn.hermes_response.model)
+            hermes_span.end()
+            last_successful_stage = "hermes"
             self.events.emit(
                 "hermes.completed",
                 device_id=window.device_id,
                 conversation_id=conversation_id,
                 turn_id=turn_id,
+                trace_id=trace_id,
+                span_id=hermes_span_id,
                 latency_ms=turn.timings_ms["hermes"],
                 response_text=turn.hermes_response.text,
                 should_speak=turn.hermes_response.should_speak,
@@ -270,29 +404,81 @@ class MinimalLoopGateway:
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    span_id=root_span_id,
                 )
                 started = time.perf_counter()
-                turn.playback_resource = await self.playback.speak(
-                    turn.hermes_response.text,
-                    device_id=window.device_id,
-                    conversation_id=conversation_id,
-                    turn_id=turn_id,
+                failed_stage = "tts_playback"
+                tts_playback_span = self.tracing.start_child_span(
+                    "tts_playback",
+                    root_span,
+                    {
+                        "device_id": window.device_id,
+                        "conversation_id": conversation_id,
+                        "turn_id": turn_id,
+                    },
                 )
-                turn.timings_ms["playback"] = round((time.perf_counter() - started) * 1000)
+                try:
+                    turn.playback_resource = await self.playback.speak(
+                        turn.hermes_response.text,
+                        device_id=window.device_id,
+                        conversation_id=conversation_id,
+                        turn_id=turn_id,
+                        trace_id=trace_id,
+                        timings_ms=turn.timings_ms,
+                        tracing=self.tracing,
+                        parent_span=tts_playback_span,
+                    )
+                except Exception as exc:
+                    tts_playback_span.set_error(exc)
+                    tts_playback_span.end()
+                    raise
+                last_successful_stage = "playback"
+                turn.timings_ms["tts_playback_total"] = round((time.perf_counter() - started) * 1000)
+                tts_playback_span.set_attribute("duration_ms", turn.timings_ms["tts_playback_total"])
+                tts_playback_span.set_attribute(
+                    "playback_id",
+                    turn.playback_resource.playback_id if turn.playback_resource is not None else None,
+                )
+                tts_playback_span.end()
             turn.state = "played"
             return turn
         except Exception as exc:
             turn.state = "failed"
             turn.error = str(exc)
+            failure_reason = type(exc).__name__
+            root_span.set_error(exc)
             self.events.emit(
                 "error.recovered",
                 device_id=window.device_id,
                 conversation_id=conversation_id,
                 turn_id=turn_id,
+                trace_id=trace_id,
+                span_id=root_span_id,
                 error=turn.error,
             )
             return turn
         finally:
+            total_ms = round((time.perf_counter() - turn_started) * 1000)
+            root_span.set_attribute("duration_ms", total_ms)
+            root_span.set_attribute("turn.status", turn.state)
+            root_span.set_attribute("failed_stage", failed_stage if turn.state == "failed" else None)
+            root_span.set_attribute("failure_reason", failure_reason or turn.error)
+            root_span.set_attribute("last_successful_stage", last_successful_stage)
+            if turn.state == "failed":
+                root_span.set_error(failure_reason or turn.error or "turn_failed")
+            self._emit_turn_summary(
+                turn,
+                device_id=window.device_id,
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                trace_id=trace_id,
+                span_id=root_span_id,
+                total_ms=total_ms,
+                failed_stage=failed_stage if turn.state == "failed" else None,
+                failure_reason=failure_reason or turn.error,
+                last_successful_stage=last_successful_stage,
+            )
             if self.dialogue.state == DialogueState.SPEAKING:
                 self.dialogue.transition(
                     DialogueState.IDLE,
@@ -300,6 +486,8 @@ class MinimalLoopGateway:
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    span_id=root_span_id,
                 )
             elif self.dialogue.state != DialogueState.IDLE:
                 self.dialogue.transition(
@@ -308,11 +496,50 @@ class MinimalLoopGateway:
                     device_id=window.device_id,
                     conversation_id=conversation_id,
                     turn_id=turn_id,
+                    trace_id=trace_id,
+                    span_id=root_span_id,
                 )
             self.endpoint.reset()
             await self.asr.reset()
             self.conversation_id = None
             self.turn_id = None
+            self.trace_id = None
+            self._root_span_id = None
+            root_span.end()
+            self._root_span = None
+
+    def _emit_turn_summary(
+        self,
+        turn: Turn,
+        *,
+        device_id: str,
+        conversation_id: str,
+        turn_id: str,
+        trace_id: str,
+        span_id: str,
+        total_ms: int,
+        failed_stage: Optional[str],
+        failure_reason: Optional[str],
+        last_successful_stage: Optional[str],
+    ) -> None:
+        stage_ms = dict(turn.timings_ms)
+        slowest_stage = _slowest_stage(stage_ms)
+        event = "turn.failed" if turn.state == "failed" else "turn.completed"
+        self.events.emit(
+            event,
+            device_id=device_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            total_ms=total_ms,
+            stage_ms=stage_ms,
+            slowest_stage=slowest_stage,
+            failed_stage=failed_stage,
+            failure_reason=failure_reason,
+            last_successful_stage=last_successful_stage,
+            turn_state=turn.state,
+        )
 
 
 def read_wave_as_chunk(path: Path, *, device_id: str = "offline", seq: int = 1) -> AudioChunk:
@@ -326,6 +553,16 @@ def read_wave_as_chunk(path: Path, *, device_id: str = "offline", seq: int = 1) 
             raise ValueError(f"{path}: expected mono WAV, got channels={channels}")
         pcm = f.readframes(f.getnframes())
     return AudioChunk(device_id=device_id, seq=seq, timestamp_ms=0, sample_rate=sample_rate, pcm=pcm)
+
+
+def _new_span_id() -> str:
+    return uuid.uuid4().hex[:16]
+
+
+def _slowest_stage(stage_ms: dict[str, int]) -> Optional[str]:
+    if not stage_ms:
+        return None
+    return max(stage_ms.items(), key=lambda item: item[1])[0]
 
 
 async def run_offline_demo(args: argparse.Namespace) -> int:
