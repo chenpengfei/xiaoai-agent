@@ -95,6 +95,22 @@ voice-gateway/logs/audit.jsonl
 
 ## 4. 事件级别
 
+运行时提供几项日志级别控制：
+
+```bash
+VOICE_GATEWAY_LOG_LEVEL=INFO
+VOICE_GATEWAY_EVENT_LEVEL=INFO
+VOICE_GATEWAY_AUDIO_PROBE_LEVEL=WARN
+VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS=1
+VOICE_GATEWAY_PROBE_INTERVAL_BYTES=160000
+```
+
+- `VOICE_GATEWAY_LOG_LEVEL`：普通运行日志最低输出级别。默认 `INFO`，保留关键运行状态并过滤 `DEBUG`。
+- `VOICE_GATEWAY_EVENT_LEVEL`：结构化事件日志 `events.jsonl` 最低记录级别。默认 `INFO`，保留主链路事件给 Loki/Grafana 使用。
+- `VOICE_GATEWAY_AUDIO_PROBE_LEVEL`：音频探测日志的最低输出级别。探测日志按 `INFO` 级别处理，默认 `WARN` 会抑制 `record stream bytes_total=...`；排查音频/VAD 时可临时改为 `INFO` 或 `DEBUG`。
+- `VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS`：是否抑制 `audio.chunk.received` 结构化事件，`1` 表示抑制，适合长期运行。
+- `VOICE_GATEWAY_PROBE_INTERVAL_BYTES`：音频探测采样间隔，单位字节。`160000` 对 16kHz、16-bit、单声道 PCM 约等于 5 秒。
+
 ```text
 debug
   高频或临时诊断，例如 audio.chunk.received

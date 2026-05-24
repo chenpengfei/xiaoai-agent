@@ -21,7 +21,7 @@ from voice_gateway.config import EndpointingConfig, load_config_from_env
 from voice_gateway.dialogue.triggers import contains_wake_word
 from voice_gateway.hermes import EchoHermesConnector, OpenAICompatibleHermesConnector
 from voice_gateway.models import AudioChunk
-from voice_gateway.observability import JsonLineEventLogger, start_metrics_server
+from voice_gateway.observability import JsonLineEventLogger, runtime_log_enabled, start_metrics_server
 from voice_gateway.playback import PlaybackManager, StaticTTSEngine, build_tts_engine, warm_tts_engine
 
 DEFAULT_WAKE_ACK_TEXTS = ("我在", "在", "诶")
@@ -240,6 +240,9 @@ class XiaoAIMinimalRuntime:
                 return
 
     def _log_probe(self, data: bytes) -> None:
+        probe_min_level = os.getenv("VOICE_GATEWAY_AUDIO_PROBE_LEVEL", "warning")
+        if not runtime_log_enabled("info") or not runtime_log_enabled("info", min_level=probe_min_level):
+            return
         if self.started_at == 0.0:
             self.started_at = time.monotonic()
         self.total_bytes += len(data)

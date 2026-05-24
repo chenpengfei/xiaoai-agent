@@ -51,6 +51,12 @@ export VOICE_GATEWAY_SILERO_MIN_SILENCE="${VOICE_GATEWAY_SILERO_MIN_SILENCE:-0.7
 export VOICE_GATEWAY_SILERO_MIN_SPEECH="${VOICE_GATEWAY_SILERO_MIN_SPEECH:-0.12}"
 # 送入 VAD/ASR 前的音频增益，单位为 dB，用于提升远场音箱采集音量。
 export VOICE_GATEWAY_VAD_GAIN_DB="${VOICE_GATEWAY_VAD_GAIN_DB:-30}"
+# 普通运行日志最低输出级别。默认保留关键状态和错误，过滤 DEBUG 噪声。
+export VOICE_GATEWAY_LOG_LEVEL="${VOICE_GATEWAY_LOG_LEVEL:-INFO}"
+# 结构化事件日志最低记录级别。events.jsonl 是 Grafana/Loki 的主数据源，默认保留 INFO/WARN/ERROR。
+export VOICE_GATEWAY_EVENT_LEVEL="${VOICE_GATEWAY_EVENT_LEVEL:-INFO}"
+# 音频探测日志最低输出级别。默认 WARN 会抑制 record stream 探测，排查音频时临时改为 INFO 或 DEBUG。
+export VOICE_GATEWAY_AUDIO_PROBE_LEVEL="${VOICE_GATEWAY_AUDIO_PROBE_LEVEL:-WARN}"
 # 是否抑制底层音频分片日志，1 表示减少噪声日志输出。
 export VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS="${VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS:-1}"
 # 结构化事件 JSONL 输出路径，用于 Loki / Grafana 查询和指标派生。
@@ -151,6 +157,11 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] starting voice-gateway minimal XiaoAI runti
 echo "voice_gateway: $VOICE_GATEWAY_DIR"
 echo "log: $LOG_FILE"
 echo "events_log: $VOICE_GATEWAY_EVENTS_LOG_FILE"
+echo "log_level: $VOICE_GATEWAY_LOG_LEVEL"
+echo "event_level: $VOICE_GATEWAY_EVENT_LEVEL"
+echo "audio_probe_level: $VOICE_GATEWAY_AUDIO_PROBE_LEVEL"
+echo "suppress_audio_chunks: $VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS"
+echo "probe_interval_bytes: $VOICE_GATEWAY_PROBE_INTERVAL_BYTES"
 echo "listen: $VOICE_GATEWAY_HOST:$VOICE_GATEWAY_PORT"
 echo "metrics: http://$VOICE_GATEWAY_METRICS_HOST:$VOICE_GATEWAY_METRICS_PORT/metrics"
 echo "otel_traces: $VOICE_GATEWAY_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"

@@ -23,6 +23,24 @@ def test_json_line_event_logger_writes_events_file(tmp_path):
     assert 'voice_gateway_events_total{event="hermes.completed",level="info"} 1' in metrics.render_prometheus()
 
 
+def test_json_line_event_logger_filters_below_min_level(tmp_path):
+    path = tmp_path / "events.jsonl"
+    metrics = MetricsRegistry()
+    logger = JsonLineEventLogger(event_log_file=path, min_level="warning", metrics_registry=metrics)
+
+    logger.emit("hermes.completed", turn_id="t_1")
+    logger.emit("wake_word.ignored", turn_id="t_1")
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["event"] == "wake_word.ignored"
+    assert payload["level"] == "warning"
+    rendered = metrics.render_prometheus()
+    assert 'voice_gateway_events_total{event="hermes.completed",level="info"}' not in rendered
+    assert 'voice_gateway_events_total{event="wake_word.ignored",level="warning"} 1' in rendered
+
+
 def test_metrics_registry_tracks_turn_summary():
     metrics = MetricsRegistry()
 
