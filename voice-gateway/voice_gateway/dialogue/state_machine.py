@@ -10,7 +10,8 @@ class DialogueStateMachine:
         DialogueState.LISTENING: {DialogueState.ENDPOINTING, DialogueState.IDLE},
         DialogueState.ENDPOINTING: {DialogueState.THINKING, DialogueState.IDLE},
         DialogueState.THINKING: {DialogueState.SPEAKING, DialogueState.IDLE},
-        DialogueState.SPEAKING: {DialogueState.IDLE},
+        DialogueState.SPEAKING: {DialogueState.FOLLOWUP_WAIT, DialogueState.IDLE},
+        DialogueState.FOLLOWUP_WAIT: {DialogueState.LISTENING, DialogueState.IDLE},
     }
 
     def __init__(self, events: EventLogger = JsonLineEventLogger()) -> None:

@@ -25,22 +25,30 @@ class OpenAICompatibleHermesConnector:
         )
 
     def _request_completion(self, turn: HermesTurn) -> str:
+        messages = [
+            {
+                "role": "system",
+                "content": "你是一个接在小爱音箱后面的家庭智能助手。回答要简短、自然、适合直接朗读。",
+            }
+        ]
+        for item in turn.history:
+            role = getattr(item, "role", None)
+            content = getattr(item, "content", None)
+            if role in {"user", "assistant"} and content:
+                messages.append({"role": role, "content": str(content)})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "请用适合语音播报的中文回答，控制在 200 字以内，"
+                    "口语化，不要使用 Markdown，不要输出代码块，不要输出很长列表。用户问题："
+                    + turn.user_text
+                ),
+            }
+        )
         payload = {
             "model": self.config.model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "你是一个接在小爱音箱后面的家庭智能助手。回答要简短、自然、适合直接朗读。",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "请用适合语音播报的中文回答，控制在 200 字以内，"
-                        "口语化，不要使用 Markdown，不要输出代码块，不要输出很长列表。用户问题："
-                        + turn.user_text
-                    ),
-                },
-            ],
+            "messages": messages,
             "temperature": 0.7,
             "max_tokens": self.config.max_tokens,
         }

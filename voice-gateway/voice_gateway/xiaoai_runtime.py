@@ -20,7 +20,7 @@ from voice_gateway.audio import EnergyEndpointDetector, SherpaOnnxEndpointDetect
 from voice_gateway.config import EndpointingConfig, load_config_from_env
 from voice_gateway.dialogue.triggers import contains_wake_word, normalize_trigger_text
 from voice_gateway.hermes import EchoHermesConnector, OpenAICompatibleHermesConnector
-from voice_gateway.models import AudioChunk
+from voice_gateway.models import AudioChunk, DialogueState
 from voice_gateway.observability import JsonLineEventLogger, runtime_log_enabled, start_metrics_server
 from voice_gateway.playback import PlaybackManager, StaticTTSEngine, build_tts_engine, warm_tts_engine
 
@@ -30,6 +30,7 @@ DEFAULT_WAKE_ACK_TEXTS = ("我在", "在", "诶")
 class RuntimeState(str, Enum):
     WAIT_WAKE_WORD = "WAIT_WAKE_WORD"
     WAIT_QUESTION = "WAIT_QUESTION"
+    FOLLOWUP_WAIT = "FOLLOWUP_WAIT"
 
 
 class XiaoAIMinimalRuntime:
@@ -44,6 +45,7 @@ class XiaoAIMinimalRuntime:
         wake_word: str = "你好",
         wake_ack_texts: tuple[str, ...] = DEFAULT_WAKE_ACK_TEXTS,
         question_timeout_seconds: float = 5.0,
+        followup_timeout_seconds: float = 15.0,
         ack_suppression_seconds: float = 0.0,
         min_question_text_chars: int = 2,
         probe: bool = False,
@@ -56,6 +58,7 @@ class XiaoAIMinimalRuntime:
         self.wake_word = wake_word
         self.wake_ack_texts = tuple(text for text in wake_ack_texts if text) or DEFAULT_WAKE_ACK_TEXTS
         self.question_timeout_seconds = question_timeout_seconds
+        self.followup_timeout_seconds = followup_timeout_seconds
         self.ack_suppression_seconds = ack_suppression_seconds
         self.min_question_text_chars = min_question_text_chars
         self.probe = probe
@@ -65,6 +68,7 @@ class XiaoAIMinimalRuntime:
         self.started_at = 0.0
         self.state = RuntimeState.WAIT_WAKE_WORD
         self.question_deadline: Optional[float] = None
+        self.followup_deadline: Optional[float] = None
         self.ignore_audio_until = 0.0
         self._last_ack_text: Optional[str] = None
         self._ack_filter_ignored_current_question = False
@@ -118,10 +122,15 @@ class XiaoAIMinimalRuntime:
                 if self.state == RuntimeState.WAIT_QUESTION and self._question_timed_out():
                     await self.gateway.listen_timeout()
                     await self._enter_wait_wake_word("question_timeout")
+                if self.state == RuntimeState.FOLLOWUP_WAIT and self._followup_timed_out():
+                    await self.gateway.followup_timeout()
+                    await self._enter_wait_wake_word("followup_timeout")
 
                 if self.state == RuntimeState.WAIT_WAKE_WORD:
                     await self._handle_wake_chunk(chunk)
                 else:
+                    if self.state == RuntimeState.FOLLOWUP_WAIT and self.gateway.state == DialogueState.FOLLOWUP_WAIT:
+                        await self.gateway.begin_followup_turn()
                     result = await self.gateway.accept_audio(chunk)
                     if result is not None:
                         if result.state == "ignored" and self._ack_filter_ignored_current_question:
@@ -136,7 +145,10 @@ class XiaoAIMinimalRuntime:
                             )
                             continue
                         self._drain_queue()
-                        await self._enter_wait_wake_word("question_finished")
+                        if self.gateway.state == DialogueState.FOLLOWUP_WAIT:
+                            await self._enter_followup_wait("question_finished")
+                        else:
+                            await self._enter_wait_wake_word("question_finished")
             except Exception as exc:
                 self.gateway.events.emit(
                     "runtime.worker.failed",
@@ -232,6 +244,7 @@ class XiaoAIMinimalRuntime:
         await self.gateway.wakeup()
         self.state = RuntimeState.WAIT_QUESTION
         self.question_deadline = time.monotonic() + self.question_timeout_seconds
+        self.followup_deadline = None
         self.gateway.events.emit(
             "runtime.state_changed",
             device_id=self.device_id,
@@ -245,6 +258,7 @@ class XiaoAIMinimalRuntime:
             await self.gateway.recover_to_idle(reason=reason, error="")
         self.state = RuntimeState.WAIT_WAKE_WORD
         self.question_deadline = None
+        self.followup_deadline = None
         self._clear_ack_filter()
         self.wake_endpoint.reset()
         await self.wake_asr.reset()
@@ -256,8 +270,24 @@ class XiaoAIMinimalRuntime:
             wake_word=self.wake_word,
         )
 
+    async def _enter_followup_wait(self, reason: str) -> None:
+        self.state = RuntimeState.FOLLOWUP_WAIT
+        self.question_deadline = None
+        self.followup_deadline = time.monotonic() + self.followup_timeout_seconds
+        self._clear_ack_filter()
+        self.gateway.events.emit(
+            "runtime.state_changed",
+            device_id=self.device_id,
+            to=self.state.value,
+            reason=reason,
+            followup_timeout_seconds=self.followup_timeout_seconds,
+        )
+
     def _question_timed_out(self) -> bool:
         return self.question_deadline is not None and time.monotonic() >= self.question_deadline
+
+    def _followup_timed_out(self) -> bool:
+        return self.followup_deadline is not None and time.monotonic() >= self.followup_deadline
 
     def _drain_queue(self) -> None:
         while True:
@@ -401,6 +431,7 @@ async def run_server(args: argparse.Namespace) -> int:
         playback=playback,
         endpoint=question_endpoint,
         events=events,
+        followup_enabled=args.followup_timeout > 0,
     )
     runtime = XiaoAIMinimalRuntime(
         gateway,
@@ -410,6 +441,7 @@ async def run_server(args: argparse.Namespace) -> int:
         device=device,
         wake_word=args.wake_word,
         question_timeout_seconds=args.question_timeout,
+        followup_timeout_seconds=args.followup_timeout,
         ack_suppression_seconds=args.ack_suppression_seconds,
         min_question_text_chars=args.min_question_text_chars,
         probe=args.probe,
@@ -487,6 +519,12 @@ def parse_args() -> argparse.Namespace:
         "--question-timeout",
         type=float,
         default=float(os.getenv("VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS", "5")),
+    )
+    parser.add_argument(
+        "--followup-timeout",
+        type=float,
+        default=float(os.getenv("VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS", "15")),
+        help="seconds to keep listening for a follow-up after playback; use 0 to disable",
     )
     parser.add_argument(
         "--ack-suppression-seconds",

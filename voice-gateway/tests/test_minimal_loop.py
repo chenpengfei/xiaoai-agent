@@ -25,6 +25,23 @@ def utterance_pcm(config: EndpointingConfig) -> bytes:
     )
 
 
+class SequenceFinalASREngine:
+    def __init__(self, texts):
+        self.texts = list(texts)
+        self.index = 0
+
+    async def accept_audio(self, _chunk):
+        return None
+
+    async def transcribe_final(self, window):
+        text = self.texts[min(self.index, len(self.texts) - 1)]
+        self.index += 1
+        return await StaticFinalASREngine(text).transcribe_final(window)
+
+    async def reset(self):
+        return None
+
+
 class MinimalLoopGatewayTest(unittest.IsolatedAsyncioTestCase):
     async def test_single_turn_returns_to_idle_after_playback(self):
         endpoint_config = EndpointingConfig(
@@ -163,6 +180,135 @@ class MinimalLoopGatewayTest(unittest.IsolatedAsyncioTestCase):
         assert tts.texts == ["你想问什么？"]
         assert len(device.played) == 1
         assert "asr.empty_question" in events.names()
+
+    async def test_followup_turn_reuses_conversation_and_sends_history(self):
+        endpoint_config = EndpointingConfig(
+            frame_ms=30,
+            speech_rms_threshold=450,
+            min_speech_ms=90,
+            min_silence_ms=90,
+        )
+        events = InMemoryEventLogger()
+        hermes = StaticHermesConnector("我是小马。")
+        device = InMemoryDeviceController()
+        tts = StaticTTSEngine()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=SequenceFinalASREngine(["你是谁", "我刚才问了什么"]),
+            hermes=hermes,
+            playback=PlaybackManager(tts=tts, device=device, events=events),
+            endpoint=EnergyEndpointDetector(endpoint_config),
+            events=events,
+            followup_enabled=True,
+        )
+
+        await gateway.wakeup()
+        first = await gateway.accept_audio(
+            AudioChunk(
+                device_id="speaker-1",
+                seq=1,
+                timestamp_ms=0,
+                pcm=utterance_pcm(endpoint_config),
+            )
+        )
+
+        assert first is not None
+        assert first.state == "played"
+        assert gateway.state == DialogueState.FOLLOWUP_WAIT
+        assert len(hermes.turns) == 1
+        assert hermes.turns[0].history == ()
+        conversation_id = first.conversation_id
+
+        await gateway.begin_followup_turn()
+        second = await gateway.accept_audio(
+            AudioChunk(
+                device_id="speaker-1",
+                seq=2,
+                timestamp_ms=1000,
+                pcm=utterance_pcm(endpoint_config),
+            )
+        )
+
+        assert second is not None
+        assert second.state == "played"
+        assert gateway.state == DialogueState.FOLLOWUP_WAIT
+        assert second.conversation_id == conversation_id
+        assert len(hermes.turns) == 2
+        assert hermes.turns[1].user_text == "我刚才问了什么"
+        assert [(item.role, item.content) for item in hermes.turns[1].history] == [
+            ("user", "你是谁"),
+            ("assistant", "我是小马。"),
+        ]
+        assert any(event.event == "followup.started" for event in events.events)
+
+    async def test_followup_timeout_clears_conversation(self):
+        endpoint_config = EndpointingConfig(
+            frame_ms=30,
+            speech_rms_threshold=450,
+            min_speech_ms=90,
+            min_silence_ms=90,
+        )
+        events = InMemoryEventLogger()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=StaticFinalASREngine("你是谁"),
+            hermes=StaticHermesConnector("我是小马。"),
+            playback=PlaybackManager(tts=StaticTTSEngine(), device=InMemoryDeviceController(), events=events),
+            endpoint=EnergyEndpointDetector(endpoint_config),
+            events=events,
+            followup_enabled=True,
+        )
+        await gateway.wakeup()
+        await gateway.accept_audio(
+            AudioChunk(
+                device_id="speaker-1",
+                seq=1,
+                timestamp_ms=0,
+                pcm=utterance_pcm(endpoint_config),
+            )
+        )
+
+        assert gateway.state == DialogueState.FOLLOWUP_WAIT
+        assert gateway.conversation_id is not None
+
+        await gateway.followup_timeout()
+
+        assert gateway.state == DialogueState.IDLE
+        assert gateway.conversation_id is None
+        assert gateway.history == []
+        assert "followup.timeout" in events.names()
+
+    async def test_history_keeps_latest_10_turns_by_default(self):
+        endpoint_config = EndpointingConfig(
+            frame_ms=30,
+            speech_rms_threshold=450,
+            min_speech_ms=90,
+            min_silence_ms=90,
+        )
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=StaticFinalASREngine("你是谁"),
+            hermes=StaticHermesConnector("我是小马。"),
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=InMemoryDeviceController(),
+                events=InMemoryEventLogger(),
+            ),
+            endpoint=EnergyEndpointDetector(endpoint_config),
+        )
+
+        for index in range(12):
+            gateway._append_history(f"问题{index}", f"回答{index}")
+
+        assert gateway._history_turns() == 10
+        assert [(item.role, item.content) for item in gateway.history[:2]] == [
+            ("user", "问题2"),
+            ("assistant", "回答2"),
+        ]
+        assert [(item.role, item.content) for item in gateway.history[-2:]] == [
+            ("user", "问题11"),
+            ("assistant", "回答11"),
+        ]
 
 
 if __name__ == "__main__":

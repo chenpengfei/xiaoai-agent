@@ -11,6 +11,7 @@ class DialogueState(str, Enum):
     ENDPOINTING = "ENDPOINTING"
     THINKING = "THINKING"
     SPEAKING = "SPEAKING"
+    FOLLOWUP_WAIT = "FOLLOWUP_WAIT"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,12 @@ class ASRResult:
     confidence: Optional[float] = None
     start_ms: int = 0
     end_ms: int = 0
+
+
+@dataclass(frozen=True)
+class DialogueMessage:
+    role: str
+    content: str
 
 
 @dataclass(frozen=True)

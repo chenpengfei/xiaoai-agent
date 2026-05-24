@@ -14,7 +14,7 @@ from voice_gateway.config import load_config_from_env
 from voice_gateway.dialogue.state_machine import DialogueStateMachine
 from voice_gateway.hermes.base import EchoHermesConnector, HermesConnector
 from voice_gateway.hermes.openai_compatible import OpenAICompatibleHermesConnector
-from voice_gateway.models import ASRResult, AudioChunk, DialogueState, HermesResponse, HermesTurn, Turn
+from voice_gateway.models import ASRResult, AudioChunk, DialogueMessage, DialogueState, HermesResponse, HermesTurn, Turn
 from voice_gateway.observability.events import EventLogger, JsonLineEventLogger
 from voice_gateway.observability.tracing import SpanHandle, TraceManager
 from voice_gateway.playback.base import PlaybackManager, StaticTTSEngine, build_tts_engine, warm_tts_engine
@@ -34,6 +34,8 @@ class MinimalLoopGateway:
         events: EventLogger = JsonLineEventLogger(),
         asr_text_transform: Optional[Callable[[ASRResult], Optional[str]]] = None,
         tracing: Optional[TraceManager] = None,
+        followup_enabled: bool = False,
+        max_history_turns: int = 10,
     ) -> None:
         self.device_id = device_id
         self.asr = asr
@@ -49,6 +51,9 @@ class MinimalLoopGateway:
         self._root_span_id: Optional[str] = None
         self._root_span: Optional[SpanHandle] = None
         self.tracing = tracing or TraceManager.from_env()
+        self.followup_enabled = followup_enabled
+        self.max_history_turns = max(0, max_history_turns)
+        self.history: list[DialogueMessage] = []
 
     @property
     def state(self) -> DialogueState:
@@ -59,6 +64,54 @@ class MinimalLoopGateway:
             self.events.emit("wakeup.ignored", device_id=self.device_id, state=self.dialogue.state.value)
             return
         self.conversation_id = f"c_{uuid.uuid4().hex}"
+        self.history = []
+        await self._start_turn(reason="wakeup_detected")
+
+    async def begin_followup_turn(self) -> None:
+        if self.dialogue.state != DialogueState.FOLLOWUP_WAIT:
+            self.events.emit("followup.ignored", device_id=self.device_id, state=self.dialogue.state.value)
+            return
+        if self.conversation_id is None:
+            self.conversation_id = f"c_{uuid.uuid4().hex}"
+        await self._start_turn(reason="followup_started")
+        self.events.emit(
+            "followup.started",
+            device_id=self.device_id,
+            conversation_id=self.conversation_id,
+            turn_id=self.turn_id,
+            trace_id=self.trace_id,
+            span_id=self._root_span_id,
+            history_turns=self._history_turns(),
+        )
+
+    async def followup_timeout(self) -> None:
+        if self.dialogue.state in {DialogueState.FOLLOWUP_WAIT, DialogueState.LISTENING, DialogueState.ENDPOINTING}:
+            self.events.emit(
+                "followup.timeout",
+                device_id=self.device_id,
+                conversation_id=self.conversation_id,
+                turn_id=self.turn_id,
+                trace_id=self.trace_id,
+                span_id=self._root_span_id,
+                history_turns=self._history_turns(),
+            )
+            self.endpoint.reset()
+            await self.asr.reset()
+            self.dialogue.transition(
+                DialogueState.IDLE,
+                reason="followup_timeout",
+                device_id=self.device_id,
+                conversation_id=self.conversation_id,
+                turn_id=self.turn_id,
+                trace_id=self.trace_id,
+                span_id=self._root_span_id,
+            )
+            self._end_current_span()
+            self._clear_conversation()
+
+    async def _start_turn(self, *, reason: str) -> None:
+        if self.conversation_id is None:
+            self.conversation_id = f"c_{uuid.uuid4().hex}"
         self.turn_id = f"t_{uuid.uuid4().hex}"
         self._root_span = self.tracing.start_root_span(
             "voice.turn",
@@ -72,17 +125,19 @@ class MinimalLoopGateway:
         self._root_span_id = self._root_span.span_id
         self.endpoint.reset()
         await self.asr.reset()
+        event_name = "wakeup.detected" if reason == "wakeup_detected" else "followup.turn_started"
         self.events.emit(
-            "wakeup.detected",
+            event_name,
             device_id=self.device_id,
             conversation_id=self.conversation_id,
             turn_id=self.turn_id,
             trace_id=self.trace_id,
             span_id=self._root_span_id,
+            history_turns=self._history_turns(),
         )
         self.dialogue.transition(
             DialogueState.LISTENING,
-            reason="wakeup_detected",
+            reason=reason,
             device_id=self.device_id,
             conversation_id=self.conversation_id,
             turn_id=self.turn_id,
@@ -152,10 +207,7 @@ class MinimalLoopGateway:
                 trace_id=self.trace_id,
                 span_id=self._root_span_id,
             )
-            self.conversation_id = None
-            self.turn_id = None
-            self.trace_id = None
-            self._root_span_id = None
+            self._clear_conversation()
             if self._root_span is not None:
                 self._root_span.end()
             self._root_span = None
@@ -188,6 +240,7 @@ class MinimalLoopGateway:
         self.turn_id = None
         self.trace_id = None
         self._root_span_id = None
+        self.history = []
         if self._root_span is not None:
             self._root_span.set_error(error)
             self._root_span.end()
@@ -211,6 +264,7 @@ class MinimalLoopGateway:
         failed_stage: Optional[str] = None
         failure_reason: Optional[str] = None
         last_successful_stage: Optional[str] = None
+        user_text_for_history: Optional[str] = None
         turn = Turn(
             turn_id=turn_id,
             conversation_id=conversation_id,
@@ -364,6 +418,7 @@ class MinimalLoopGateway:
                 trace_id=trace_id,
                 span_id=hermes_span_id,
                 user_text=user_text,
+                history_turns=self._history_turns(),
             )
             failed_stage = "hermes"
             try:
@@ -372,7 +427,7 @@ class MinimalLoopGateway:
                         conversation_id=conversation_id,
                         user_text=user_text,
                         speaker=None,
-                        history=(),
+                        history=tuple(self.history),
                     )
                 )
             except Exception as exc:
@@ -395,7 +450,9 @@ class MinimalLoopGateway:
                 response_text=turn.hermes_response.text,
                 should_speak=turn.hermes_response.should_speak,
                 model=turn.hermes_response.model,
+                history_turns=self._history_turns(),
             )
+            user_text_for_history = user_text
 
             if turn.hermes_response.should_speak:
                 self.dialogue.transition(
@@ -480,15 +537,35 @@ class MinimalLoopGateway:
                 last_successful_stage=last_successful_stage,
             )
             if self.dialogue.state == DialogueState.SPEAKING:
-                self.dialogue.transition(
-                    DialogueState.IDLE,
-                    reason="playback_finished",
-                    device_id=window.device_id,
-                    conversation_id=conversation_id,
-                    turn_id=turn_id,
-                    trace_id=trace_id,
-                    span_id=root_span_id,
-                )
+                if (
+                    self.followup_enabled
+                    and turn.state == "played"
+                    and turn.error is None
+                    and turn.hermes_response is not None
+                    and turn.hermes_response.should_speak
+                ):
+                    if user_text_for_history:
+                        self._append_history(user_text_for_history, turn.hermes_response.text)
+                    self.dialogue.transition(
+                        DialogueState.FOLLOWUP_WAIT,
+                        reason="playback_finished",
+                        device_id=window.device_id,
+                        conversation_id=conversation_id,
+                        turn_id=turn_id,
+                        trace_id=trace_id,
+                        span_id=root_span_id,
+                        history_turns=self._history_turns(),
+                    )
+                else:
+                    self.dialogue.transition(
+                        DialogueState.IDLE,
+                        reason="playback_finished",
+                        device_id=window.device_id,
+                        conversation_id=conversation_id,
+                        turn_id=turn_id,
+                        trace_id=trace_id,
+                        span_id=root_span_id,
+                    )
             elif self.dialogue.state != DialogueState.IDLE:
                 self.dialogue.transition(
                     DialogueState.IDLE,
@@ -501,10 +578,13 @@ class MinimalLoopGateway:
                 )
             self.endpoint.reset()
             await self.asr.reset()
-            self.conversation_id = None
-            self.turn_id = None
-            self.trace_id = None
-            self._root_span_id = None
+            keep_conversation = self.dialogue.state == DialogueState.FOLLOWUP_WAIT
+            if keep_conversation:
+                self.turn_id = None
+                self.trace_id = None
+                self._root_span_id = None
+            else:
+                self._clear_conversation()
             root_span.end()
             self._root_span = None
 
@@ -540,6 +620,37 @@ class MinimalLoopGateway:
             last_successful_stage=last_successful_stage,
             turn_state=turn.state,
         )
+
+    def _append_history(self, user_text: str, response_text: str) -> None:
+        if self.max_history_turns <= 0:
+            return
+        self.history.extend(
+            (
+                DialogueMessage(role="user", content=user_text),
+                DialogueMessage(role="assistant", content=response_text),
+            )
+        )
+        max_messages = self.max_history_turns * 2
+        if len(self.history) > max_messages:
+            self.history = self.history[-max_messages:]
+
+    def _history_turns(self) -> int:
+        return len(self.history) // 2
+
+    def _end_current_span(self) -> None:
+        if self._root_span is not None:
+            self._root_span.end()
+        self._root_span = None
+        self.trace_id = None
+        self._root_span_id = None
+        self.turn_id = None
+
+    def _clear_conversation(self) -> None:
+        self.conversation_id = None
+        self.turn_id = None
+        self.trace_id = None
+        self._root_span_id = None
+        self.history = []
 
 
 def read_wave_as_chunk(path: Path, *, device_id: str = "offline", seq: int = 1) -> AudioChunk:

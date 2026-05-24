@@ -30,6 +30,8 @@ export VOICE_GATEWAY_HOST="${VOICE_GATEWAY_HOST:-0.0.0.0}"
 export VOICE_GATEWAY_PORT="${VOICE_GATEWAY_PORT:-4399}"
 # 唤醒后等待用户正式提问的最长时间，单位为秒。
 export VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS="${VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS:-5}"
+# 回答播放结束后的免唤醒追问窗口，单位为秒；设为 0 可关闭连续对话。
+export VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS="${VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS:-15}"
 # 播放唤醒提示短语后额外忽略采集音频的时长。miplayer 已被 await，默认不再丢弃句首。
 export VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS="${VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS:-0}"
 # ACK 前缀剥离后少于该字符数则认为不是有效问题，继续等待用户提问。
@@ -168,7 +170,8 @@ echo "listen: $VOICE_GATEWAY_HOST:$VOICE_GATEWAY_PORT"
 echo "metrics: http://$VOICE_GATEWAY_METRICS_HOST:$VOICE_GATEWAY_METRICS_PORT/metrics"
 echo "otel_traces: $VOICE_GATEWAY_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 echo "wake_word: $VOICE_GATEWAY_WAKE_WORD"
-echo "route: wake word -> random speaker text ack -> next utterance as Hermes question"
+echo "followup_timeout_seconds: $VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS"
+echo "route: wake word -> random speaker text ack -> question -> Hermes -> follow-up window"
 echo "openai_base_url: $VOICE_GATEWAY_OPENAI_BASE_URL"
 echo "openai_model: $VOICE_GATEWAY_OPENAI_MODEL"
 echo "tts_engine: edge"

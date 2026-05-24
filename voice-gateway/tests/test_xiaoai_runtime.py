@@ -355,6 +355,60 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         await runtime.stop()
 
+    async def test_followup_question_does_not_require_wake_word(self):
+        events = InMemoryEventLogger()
+        hermes = StaticHermesConnector("我是小马。")
+        playback_device = InMemoryDeviceController()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=SequenceFinalASREngine(["你是谁", "我刚才问了什么"]),
+            hermes=hermes,
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=playback_device,
+                events=events,
+            ),
+            endpoint=OneShotEndpoint(),
+            events=events,
+            followup_enabled=True,
+        )
+        runtime = XiaoAIMinimalRuntime(
+            gateway,
+            device_id="speaker-1",
+            wake_asr=StaticFinalASREngine("你好"),
+            wake_endpoint=OneShotEndpoint(),
+            device=playback_device,
+            wake_word="你好",
+            wake_ack_texts=("在",),
+            followup_timeout_seconds=15,
+        )
+
+        await runtime.start()
+        runtime._put_nowait(b"\x01\x00" * 480)
+        await asyncio.sleep(0.05)
+        runtime._put_nowait(b"\x02\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert gateway.state.value == "FOLLOWUP_WAIT"
+        assert len(hermes.turns) == 1
+        conversation_id = hermes.turns[0].conversation_id
+
+        runtime._put_nowait(b"\x03\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert len(hermes.turns) == 2
+        assert hermes.turns[1].conversation_id == conversation_id
+        assert hermes.turns[1].user_text == "我刚才问了什么"
+        assert [(item.role, item.content) for item in hermes.turns[1].history] == [
+            ("user", "你是谁"),
+            ("assistant", "我是小马。"),
+        ]
+        assert "followup.started" in events.names()
+
+        await runtime.stop()
+
     async def test_failed_wake_ack_does_not_suppress_question_audio(self):
         events = InMemoryEventLogger()
         hermes = StaticHermesConnector("我是小马。")
