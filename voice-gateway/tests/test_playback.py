@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from voice_gateway.config import TTSConfig
-from voice_gateway.playback import EdgeTTSFileEngine, build_tts_engine
+from voice_gateway.playback import EdgeTTSFileEngine, PlaybackManager, build_tts_engine
 from voice_gateway.playback.base import DEFAULT_CACHED_TTS_TEXTS
 
 
@@ -60,6 +60,34 @@ class EdgeTTSFileEngineTest(unittest.TestCase):
                     asyncio_run(engine.synthesize_file(text))
 
             self.assertEqual(run_edge_tts.call_count, len(DEFAULT_CACHED_TTS_TEXTS))
+
+    def test_cached_synthesis_requires_existing_cache_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = EdgeTTSFileEngine(TTSConfig(output_dir=Path(tmp), http_base_url="http://127.0.0.1:8765"))
+
+            with patch.object(engine, "_run_edge_tts") as run_edge_tts:
+                with self.assertRaisesRegex(RuntimeError, "cached TTS file is missing"):
+                    asyncio_run(engine.synthesize_cached_file("我在"))
+
+            run_edge_tts.assert_not_called()
+
+    def test_playback_manager_speak_cached_requires_cache_hit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = EdgeTTSFileEngine(TTSConfig(output_dir=Path(tmp), http_base_url="http://127.0.0.1:8765"))
+            playback = PlaybackManager(tts=engine)
+
+            with patch.object(engine, "_run_edge_tts") as run_edge_tts:
+                with self.assertRaisesRegex(RuntimeError, "cached TTS file is missing"):
+                    asyncio_run(
+                        playback.speak_cached(
+                            "我在",
+                            device_id="speaker-1",
+                            conversation_id="c_1",
+                            turn_id="t_1",
+                        )
+                    )
+
+            run_edge_tts.assert_not_called()
 
     def test_non_cached_text_uses_new_file_each_time(self):
         with tempfile.TemporaryDirectory() as tmp:

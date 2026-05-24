@@ -35,6 +35,9 @@ class StaticTTSEngine:
         self.texts.append(text)
         return PlaybackResource(playback_id=f"p_{uuid.uuid4().hex}", url=self.url, format=self.format)
 
+    async def synthesize_cached_file(self, text: str) -> PlaybackResource:
+        return await self.synthesize_file(text)
+
 
 class EdgeTTSFileEngine:
     engine_name = "edge"
@@ -63,6 +66,23 @@ class EdgeTTSFileEngine:
             url=f"{self.config.http_base_url}/{_relative_url_path(self.config.output_dir, path)}",
             format="mp3",
             duration_ms=elapsed_ms,
+            local_path=str(path),
+            tts_engine=self.engine_name,
+            tts_model=self.config.voice,
+        )
+
+    async def synthesize_cached_file(self, text: str) -> PlaybackResource:
+        if text not in self.cached_texts:
+            raise RuntimeError(f"text is not configured for TTS cache: {text}")
+        path = self._cached_path_for_text(text)
+        if not path.exists():
+            raise RuntimeError(f"cached TTS file is missing for text: {text}")
+        playback_id = f"p_{uuid.uuid4().hex}"
+        return PlaybackResource(
+            playback_id=playback_id,
+            url=f"{self.config.http_base_url}/{_relative_url_path(self.config.output_dir, path)}",
+            format="mp3",
+            duration_ms=0,
             local_path=str(path),
             tts_engine=self.engine_name,
             tts_model=self.config.voice,
@@ -99,12 +119,15 @@ class EdgeTTSFileEngine:
 
     def _path_for_text(self, text: str, playback_id: str) -> Path:
         if text in self.cached_texts:
-            digest = hashlib.sha256(
-                f"{self.config.voice}\n{self.config.rate}\n{text}".encode("utf-8")
-            ).hexdigest()[:16]
-            return self.config.output_dir / "cache" / f"edge-{digest}.mp3"
+            return self._cached_path_for_text(text)
         name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{playback_id}.mp3"
         return self.config.output_dir / name
+
+    def _cached_path_for_text(self, text: str) -> Path:
+        digest = hashlib.sha256(
+            f"{self.config.voice}\n{self.config.rate}\n{text}".encode("utf-8")
+        ).hexdigest()[:16]
+        return self.config.output_dir / "cache" / f"edge-{digest}.mp3"
 
 
 def build_tts_engine(config: TTSConfig) -> TTSEngine:
@@ -114,10 +137,7 @@ def build_tts_engine(config: TTSConfig) -> TTSEngine:
 async def warm_tts_engine(engine: TTSEngine) -> None:
     warm_cache = getattr(engine, "warm_cache", None)
     if warm_cache is not None:
-        try:
-            await warm_cache()
-        except Exception as exc:
-            print(f"TTS cache warm failed: {exc}", file=sys.stderr)
+        await warm_cache()
 
 
 class PlaybackManager:
@@ -143,6 +163,55 @@ class PlaybackManager:
         tracing: TraceManager | None = None,
         parent_span: SpanHandle | None = None,
     ) -> PlaybackResource:
+        return await self._speak(
+            text,
+            device_id=device_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            trace_id=trace_id,
+            timings_ms=timings_ms,
+            tracing=tracing,
+            parent_span=parent_span,
+            require_cached_tts=False,
+        )
+
+    async def speak_cached(
+        self,
+        text: str,
+        *,
+        device_id: str,
+        conversation_id: str,
+        turn_id: str,
+        trace_id: str | None = None,
+        timings_ms: Optional[dict[str, int]] = None,
+        tracing: TraceManager | None = None,
+        parent_span: SpanHandle | None = None,
+    ) -> PlaybackResource:
+        return await self._speak(
+            text,
+            device_id=device_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            trace_id=trace_id,
+            timings_ms=timings_ms,
+            tracing=tracing,
+            parent_span=parent_span,
+            require_cached_tts=True,
+        )
+
+    async def _speak(
+        self,
+        text: str,
+        *,
+        device_id: str,
+        conversation_id: str,
+        turn_id: str,
+        trace_id: str | None = None,
+        timings_ms: Optional[dict[str, int]] = None,
+        tracing: TraceManager | None = None,
+        parent_span: SpanHandle | None = None,
+        require_cached_tts: bool,
+    ) -> PlaybackResource:
         event_fields = {
             "device_id": device_id,
             "conversation_id": conversation_id,
@@ -154,7 +223,13 @@ class PlaybackManager:
         self.events.emit("tts.started", span_id=tts_span_id, **event_fields)
         started = time.perf_counter()
         try:
-            resource = await self.tts.synthesize_file(text)
+            if require_cached_tts:
+                synthesize_cached_file = getattr(self.tts, "synthesize_cached_file", None)
+                if synthesize_cached_file is None:
+                    raise RuntimeError("TTS engine does not support required cache hits")
+                resource = await synthesize_cached_file(text)
+            else:
+                resource = await self.tts.synthesize_file(text)
         except Exception as exc:
             if tts_span is not None:
                 tts_span.set_error(exc)

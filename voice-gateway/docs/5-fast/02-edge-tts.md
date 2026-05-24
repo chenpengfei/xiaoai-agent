@@ -38,6 +38,23 @@ VOICE_GATEWAY_TTS_RATE=+0%
 
 当前内置固定短提示缓存：“我在”“在”“诶”“已连接”。启动时会预加载这些短句，缓存文件放在 `VOICE_GATEWAY_TTS_OUTPUT_DIR/cache/`，文件名包含音色、语速和文本的哈希；普通 Hermes 回答仍按请求生成独立 mp3。
 
+唤醒反馈和“已连接”提示是硬缓存命中策略：播放时只允许读取已经预热好的 mp3。如果缓存文件不存在，本次提示直接失败并记录错误，不在唤醒现场临时调用 Edge TTS。
+
+## 交互参数
+
+对齐 Microsoft Speech 交互式识别的常用参数：
+
+```bash
+VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS=5
+VOICE_GATEWAY_SILERO_MIN_SILENCE=0.5
+```
+
+含义：
+
+- 唤醒后最多等待用户问题 `5s`，对齐常见 initial silence timeout。
+- 用户说话后检测到 `0.5s` 静音即判定一句话结束，对齐常见 segmentation silence timeout。
+- `VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS=0`。`miplayer` 播放已被 await，默认不额外丢弃反馈后的音频，避免快语速用户的句首被切掉；如实测存在明显回采，再临时调高。
+
 ## 可观测性
 
 TTS 事件保留运行期必需字段：

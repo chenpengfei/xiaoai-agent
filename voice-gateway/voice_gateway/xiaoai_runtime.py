@@ -43,8 +43,8 @@ class XiaoAIMinimalRuntime:
         device: Optional[XiaoAIDeviceController] = None,
         wake_word: str = "你好",
         wake_ack_texts: tuple[str, ...] = DEFAULT_WAKE_ACK_TEXTS,
-        question_timeout_seconds: float = 8.0,
-        ack_suppression_seconds: float = 0.4,
+        question_timeout_seconds: float = 5.0,
+        ack_suppression_seconds: float = 0.0,
         probe: bool = False,
     ) -> None:
         self.gateway = gateway
@@ -57,7 +57,7 @@ class XiaoAIMinimalRuntime:
         self.question_timeout_seconds = question_timeout_seconds
         self.ack_suppression_seconds = ack_suppression_seconds
         self.probe = probe
-        self.queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=500)
+        self.queue: asyncio.Queue[tuple[float, bytes]] = asyncio.Queue(maxsize=500)
         self.seq = 0
         self.total_bytes = 0
         self.started_at = 0.0
@@ -84,20 +84,21 @@ class XiaoAIMinimalRuntime:
                 pass
 
     def _put_nowait(self, data: bytes) -> None:
+        item = (time.monotonic(), data)
         try:
-            self.queue.put_nowait(data)
+            self.queue.put_nowait(item)
         except asyncio.QueueFull:
             try:
                 self.queue.get_nowait()
             except asyncio.QueueEmpty:
                 pass
-            self.queue.put_nowait(data)
+            self.queue.put_nowait(item)
 
     async def _worker(self) -> None:
         while True:
-            data = await self.queue.get()
+            enqueued_at, data = await self.queue.get()
             try:
-                if time.monotonic() < self.ignore_audio_until:
+                if enqueued_at < self.ignore_audio_until:
                     continue
                 self.seq += 1
                 if self.probe:
@@ -105,7 +106,7 @@ class XiaoAIMinimalRuntime:
                 chunk = AudioChunk(
                     device_id=self.device_id,
                     seq=self.seq,
-                    timestamp_ms=round(time.monotonic() * 1000),
+                    timestamp_ms=round(enqueued_at * 1000),
                     pcm=data,
                 )
                 if self.state == RuntimeState.WAIT_QUESTION and self._question_timed_out():
@@ -171,13 +172,15 @@ class XiaoAIMinimalRuntime:
             wake_word=self.wake_word,
             text=text,
         )
+        ack_started_at = time.monotonic()
+        self._drain_queue_before(ack_started_at)
         ack_ok = False
         if self.device is not None:
             ack_text = random.choice(self.wake_ack_texts)
             error = None
             try:
                 ack_id = f"wake_ack_{uuid.uuid4().hex}"
-                await self.gateway.playback.speak(
+                await self.gateway.playback.speak_cached(
                     ack_text,
                     device_id=self.device_id,
                     conversation_id=ack_id,
@@ -195,12 +198,14 @@ class XiaoAIMinimalRuntime:
                 ok=ack_ok,
                 error=error,
             )
-        self._drain_queue()
-        # Only suppress microphone audio when the speaker actually played an
-        # acknowledgement.  If the ack command failed, users naturally start
-        # speaking immediately; dropping the next ~400ms then clips the first
-        # character of the real question before ASR sees it.
-        self.ignore_audio_until = time.monotonic() + self.ack_suppression_seconds if ack_ok else 0.0
+        # Only suppress microphone audio when explicitly configured.  The
+        # default is no extra suppression because users may start speaking
+        # during the acknowledgement and we need to preserve those first words.
+        self.ignore_audio_until = (
+            time.monotonic() + max(0.0, self.ack_suppression_seconds)
+            if ack_ok and self.ack_suppression_seconds > 0
+            else 0.0
+        )
         await self.wake_asr.reset()
         self.wake_endpoint.reset()
         await self.gateway.wakeup()
@@ -238,6 +243,18 @@ class XiaoAIMinimalRuntime:
                 self.queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
+
+    def _drain_queue_before(self, cutoff: float) -> None:
+        kept: list[tuple[float, bytes]] = []
+        while True:
+            try:
+                item = self.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if item[0] >= cutoff:
+                kept.append(item)
+        for item in kept:
+            self.queue.put_nowait(item)
 
     def _log_probe(self, data: bytes) -> None:
         probe_min_level = os.getenv("VOICE_GATEWAY_AUDIO_PROBE_LEVEL", "warning")
@@ -358,7 +375,7 @@ async def _play_connected_prompt(gateway: MinimalLoopGateway, device_id: str) ->
     error = None
     ok = False
     try:
-        await gateway.playback.speak(
+        await gateway.playback.speak_cached(
             text,
             device_id=device_id,
             conversation_id=connection_id,
@@ -386,12 +403,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--question-timeout",
         type=float,
-        default=float(os.getenv("VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS", "8")),
+        default=float(os.getenv("VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS", "5")),
     )
     parser.add_argument(
         "--ack-suppression-seconds",
         type=float,
-        default=float(os.getenv("VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS", "0.4")),
+        default=float(os.getenv("VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS", "0")),
     )
     parser.add_argument("--probe", action="store_true", help="log record stream byte progress")
     parser.add_argument(
@@ -425,7 +442,7 @@ def _build_endpoint(args: argparse.Namespace, config):
         _abs_path(config.silero_vad_model),
         EndpointingConfig(sample_rate=16000),
         threshold=float(os.getenv("VOICE_GATEWAY_SILERO_VAD_THRESHOLD", "0.5")),
-        min_silence_seconds=float(os.getenv("VOICE_GATEWAY_SILERO_MIN_SILENCE", "0.75")),
+        min_silence_seconds=float(os.getenv("VOICE_GATEWAY_SILERO_MIN_SILENCE", "0.5")),
         min_speech_seconds=float(os.getenv("VOICE_GATEWAY_SILERO_MIN_SPEECH", "0.1")),
         vad_gain_db=float(os.getenv("VOICE_GATEWAY_VAD_GAIN_DB", "24")),
         max_speech_seconds=float(os.getenv("VOICE_GATEWAY_MAX_SPEECH_SECONDS", "8")),
