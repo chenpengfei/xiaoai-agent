@@ -47,6 +47,7 @@ VOICE_GATEWAY_TTS_RATE=+0%
 ```bash
 VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS=5
 VOICE_GATEWAY_SILERO_MIN_SILENCE=0.5
+VOICE_GATEWAY_MIN_QUESTION_TEXT_CHARS=2
 ```
 
 含义：
@@ -54,6 +55,7 @@ VOICE_GATEWAY_SILERO_MIN_SILENCE=0.5
 - 唤醒后最多等待用户问题 `5s`，对齐常见 initial silence timeout。
 - 用户说话后检测到 `0.5s` 静音即判定一句话结束，对齐常见 segmentation silence timeout。
 - `VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS=0`。`miplayer` 播放已被 await，默认不额外丢弃反馈后的音频，避免快语速用户的句首被切掉；如实测存在明显回采，再临时调高。
+- 当前问题等待期间启用 ACK 文本过滤：如果 ASR 文本以“我在”“在”“诶”等反馈短句开头，则剥离该前缀；剥离后少于 `2` 个字符则忽略本次短文本并继续等待用户问题。
 
 ## 可观测性
 

@@ -47,6 +47,23 @@ class RejectingDeviceController:
         return False
 
 
+class SequenceFinalASREngine:
+    def __init__(self, texts):
+        self.texts = list(texts)
+        self.index = 0
+
+    async def accept_audio(self, _chunk):
+        return None
+
+    async def transcribe_final(self, window):
+        text = self.texts[min(self.index, len(self.texts) - 1)]
+        self.index += 1
+        return await StaticFinalASREngine(text).transcribe_final(window)
+
+    async def reset(self):
+        return None
+
+
 class QueueDuringAckDeviceController:
     def __init__(self):
         self.played = []
@@ -239,6 +256,96 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
         runtime._put_nowait(b"\x01\x00" * 480)
         await asyncio.sleep(0.05)
         runtime._put_nowait(b"\x02\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.WAIT_WAKE_WORD
+        assert len(hermes.turns) == 1
+        assert hermes.turns[0].user_text == "家里有几个人"
+        assert len(playback_device.played) == 2
+
+        await runtime.stop()
+
+    async def test_wake_ack_prefix_is_stripped_from_question_text(self):
+        events = InMemoryEventLogger()
+        hermes = StaticHermesConnector("三个人。")
+        playback_device = InMemoryDeviceController()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=StaticFinalASREngine("在家里有几个人"),
+            hermes=hermes,
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=playback_device,
+                events=events,
+            ),
+            endpoint=OneShotEndpoint(),
+            events=events,
+        )
+        runtime = XiaoAIMinimalRuntime(
+            gateway,
+            device_id="speaker-1",
+            wake_asr=StaticFinalASREngine("你好"),
+            wake_endpoint=OneShotEndpoint(),
+            device=playback_device,
+            wake_word="你好",
+            wake_ack_texts=("在",),
+        )
+
+        await runtime.start()
+        runtime._put_nowait(b"\x01\x00" * 480)
+        await asyncio.sleep(0.05)
+        runtime._put_nowait(b"\x02\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.WAIT_WAKE_WORD
+        assert len(hermes.turns) == 1
+        assert hermes.turns[0].user_text == "家里有几个人"
+        ack_filter = next(event for event in events.events if event.event == "asr.ack_filter_applied")
+        assert ack_filter.fields["action"] == "strip_prefix"
+        assert ack_filter.fields["filtered_text"] == "家里有几个人"
+
+        await runtime.stop()
+
+    async def test_short_wake_ack_echo_is_ignored_and_runtime_keeps_waiting_for_question(self):
+        events = InMemoryEventLogger()
+        hermes = StaticHermesConnector("三个人。")
+        playback_device = InMemoryDeviceController()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=SequenceFinalASREngine(["在", "家里有几个人"]),
+            hermes=hermes,
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=playback_device,
+                events=events,
+            ),
+            endpoint=OneShotEndpoint(),
+            events=events,
+        )
+        runtime = XiaoAIMinimalRuntime(
+            gateway,
+            device_id="speaker-1",
+            wake_asr=StaticFinalASREngine("你好"),
+            wake_endpoint=OneShotEndpoint(),
+            device=playback_device,
+            wake_word="你好",
+            wake_ack_texts=("在",),
+        )
+
+        await runtime.start()
+        runtime._put_nowait(b"\x01\x00" * 480)
+        await asyncio.sleep(0.05)
+        runtime._put_nowait(b"\x02\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.WAIT_QUESTION
+        assert hermes.turns == []
+        assert len(playback_device.played) == 1
+        ack_filter = next(event for event in events.events if event.event == "asr.ack_filter_applied")
+        assert ack_filter.fields["action"] == "ignore_short"
+        assert "runtime.question_ignored" in events.names()
+
+        runtime._put_nowait(b"\x03\x00" * 480)
         await asyncio.sleep(0.05)
 
         assert runtime.state == RuntimeState.WAIT_WAKE_WORD

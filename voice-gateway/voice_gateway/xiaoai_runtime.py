@@ -18,7 +18,7 @@ from voice_gateway.app import MinimalLoopGateway
 from voice_gateway.asr import ASREngine, SherpaOnnxOfflineASREngine, StaticFinalASREngine
 from voice_gateway.audio import EnergyEndpointDetector, SherpaOnnxEndpointDetector
 from voice_gateway.config import EndpointingConfig, load_config_from_env
-from voice_gateway.dialogue.triggers import contains_wake_word
+from voice_gateway.dialogue.triggers import contains_wake_word, normalize_trigger_text
 from voice_gateway.hermes import EchoHermesConnector, OpenAICompatibleHermesConnector
 from voice_gateway.models import AudioChunk
 from voice_gateway.observability import JsonLineEventLogger, runtime_log_enabled, start_metrics_server
@@ -45,6 +45,7 @@ class XiaoAIMinimalRuntime:
         wake_ack_texts: tuple[str, ...] = DEFAULT_WAKE_ACK_TEXTS,
         question_timeout_seconds: float = 5.0,
         ack_suppression_seconds: float = 0.0,
+        min_question_text_chars: int = 2,
         probe: bool = False,
     ) -> None:
         self.gateway = gateway
@@ -56,6 +57,7 @@ class XiaoAIMinimalRuntime:
         self.wake_ack_texts = tuple(text for text in wake_ack_texts if text) or DEFAULT_WAKE_ACK_TEXTS
         self.question_timeout_seconds = question_timeout_seconds
         self.ack_suppression_seconds = ack_suppression_seconds
+        self.min_question_text_chars = min_question_text_chars
         self.probe = probe
         self.queue: asyncio.Queue[tuple[float, bytes]] = asyncio.Queue(maxsize=500)
         self.seq = 0
@@ -64,6 +66,10 @@ class XiaoAIMinimalRuntime:
         self.state = RuntimeState.WAIT_WAKE_WORD
         self.question_deadline: Optional[float] = None
         self.ignore_audio_until = 0.0
+        self._last_ack_text: Optional[str] = None
+        self._ack_filter_ignored_current_question = False
+        self._base_asr_text_transform = gateway.asr_text_transform
+        self.gateway.asr_text_transform = self._transform_question_asr_text
         self._worker_task: Optional[asyncio.Task] = None
 
     def on_input_data_threadsafe(self, loop: asyncio.AbstractEventLoop, data: bytes) -> None:
@@ -118,6 +124,17 @@ class XiaoAIMinimalRuntime:
                 else:
                     result = await self.gateway.accept_audio(chunk)
                     if result is not None:
+                        if result.state == "ignored" and self._ack_filter_ignored_current_question:
+                            self._ack_filter_ignored_current_question = False
+                            await self.gateway.wakeup()
+                            self.question_deadline = time.monotonic() + self.question_timeout_seconds
+                            self.gateway.events.emit(
+                                "runtime.question_ignored",
+                                device_id=self.device_id,
+                                reason="ack_filter_short_text",
+                                question_timeout_seconds=self.question_timeout_seconds,
+                            )
+                            continue
                         self._drain_queue()
                         await self._enter_wait_wake_word("question_finished")
             except Exception as exc:
@@ -206,6 +223,10 @@ class XiaoAIMinimalRuntime:
             if ack_ok and self.ack_suppression_seconds > 0
             else 0.0
         )
+        if ack_ok:
+            self._last_ack_text = ack_text
+        else:
+            self._clear_ack_filter()
         await self.wake_asr.reset()
         self.wake_endpoint.reset()
         await self.gateway.wakeup()
@@ -224,6 +245,7 @@ class XiaoAIMinimalRuntime:
             await self.gateway.recover_to_idle(reason=reason, error="")
         self.state = RuntimeState.WAIT_WAKE_WORD
         self.question_deadline = None
+        self._clear_ack_filter()
         self.wake_endpoint.reset()
         await self.wake_asr.reset()
         self.gateway.events.emit(
@@ -255,6 +277,66 @@ class XiaoAIMinimalRuntime:
                 kept.append(item)
         for item in kept:
             self.queue.put_nowait(item)
+
+    def _transform_question_asr_text(self, asr) -> Optional[str]:
+        self._ack_filter_ignored_current_question = False
+        if self._base_asr_text_transform is not None:
+            user_text = self._base_asr_text_transform(asr)
+        else:
+            user_text = asr.normalized_text or normalize_trigger_text(asr.text or "")
+
+        if user_text is None:
+            return None
+
+        normalized = normalize_trigger_text(user_text)
+        if not normalized or self._last_ack_text is None:
+            return user_text
+
+        for ack_text in self._ack_filter_candidates():
+            normalized_ack = normalize_trigger_text(ack_text)
+            if not normalized_ack or not normalized.startswith(normalized_ack):
+                continue
+
+            stripped = normalized[len(normalized_ack) :]
+            if len(stripped) < self.min_question_text_chars:
+                self._ack_filter_ignored_current_question = True
+                self.gateway.events.emit(
+                    "asr.ack_filter_applied",
+                    device_id=self.device_id,
+                    action="ignore_short",
+                    ack_text=ack_text,
+                    text=asr.text,
+                    normalized_text=asr.normalized_text,
+                    filtered_text=stripped,
+                    min_question_text_chars=self.min_question_text_chars,
+                )
+                return None
+
+            self.gateway.events.emit(
+                "asr.ack_filter_applied",
+                device_id=self.device_id,
+                action="strip_prefix",
+                ack_text=ack_text,
+                text=asr.text,
+                normalized_text=asr.normalized_text,
+                filtered_text=stripped,
+                min_question_text_chars=self.min_question_text_chars,
+            )
+            return stripped
+
+        return user_text
+
+    def _ack_filter_candidates(self) -> tuple[str, ...]:
+        candidates = []
+        if self._last_ack_text:
+            candidates.append(self._last_ack_text)
+        candidates.extend(self.wake_ack_texts)
+        unique = tuple(dict.fromkeys(candidates))
+        return tuple(sorted(unique, key=lambda text: len(normalize_trigger_text(text)), reverse=True))
+
+    def _clear_ack_filter(self) -> None:
+        self._last_ack_text = None
+        self._ack_filter_ignored_current_question = False
 
     def _log_probe(self, data: bytes) -> None:
         probe_min_level = os.getenv("VOICE_GATEWAY_AUDIO_PROBE_LEVEL", "warning")
@@ -329,6 +411,7 @@ async def run_server(args: argparse.Namespace) -> int:
         wake_word=args.wake_word,
         question_timeout_seconds=args.question_timeout,
         ack_suppression_seconds=args.ack_suppression_seconds,
+        min_question_text_chars=args.min_question_text_chars,
         probe=args.probe,
     )
 
@@ -409,6 +492,11 @@ def parse_args() -> argparse.Namespace:
         "--ack-suppression-seconds",
         type=float,
         default=float(os.getenv("VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS", "0")),
+    )
+    parser.add_argument(
+        "--min-question-text-chars",
+        type=int,
+        default=int(os.getenv("VOICE_GATEWAY_MIN_QUESTION_TEXT_CHARS", "2")),
     )
     parser.add_argument("--probe", action="store_true", help="log record stream byte progress")
     parser.add_argument(

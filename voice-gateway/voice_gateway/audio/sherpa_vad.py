@@ -111,19 +111,13 @@ class SherpaOnnxEndpointDetector:
             if self._speech_started and not vad.is_speech_detected():
                 while not vad.empty():
                     vad.pop()
-                # Use the raw captured window instead of sherpa's completed
-                # segment samples.  The raw window includes our pre-roll and
-                # the current trailing frame, which is more forgiving for real
-                # far-field XiaoAI audio; model segments can trim the first or
-                # last low-energy syllable before final ASR.
-                window = self._raw_window(chunk.device_id, self._fallback_start_sample, bytes(self._fallback_pcm))
-                if window.duration_ms > 0:
-                    events.append(EndpointEvent(kind="speech_ended", window=window, timestamp_ms=window.end_ms))
-                self._speech_started = False
-                self._fallback_pcm = bytearray()
-                self._fallback_silence_ms = 0
 
             if self._speech_started and self._fallback_silence_ms >= round(self.min_silence_seconds * 1000):
+                # Use the raw captured window instead of sherpa's completed
+                # segment samples.  The raw window includes our pre-roll and
+                # trailing silence, which is more forgiving for real far-field
+                # XiaoAI audio; model segments can trim low-energy syllables
+                # before final ASR.
                 window = self._raw_window(chunk.device_id, self._fallback_start_sample, bytes(self._fallback_pcm))
                 if window.duration_ms > 0:
                     events.append(EndpointEvent(kind="speech_ended", window=window, timestamp_ms=window.end_ms))

@@ -32,6 +32,8 @@ export VOICE_GATEWAY_PORT="${VOICE_GATEWAY_PORT:-4399}"
 export VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS="${VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS:-5}"
 # 播放唤醒提示短语后额外忽略采集音频的时长。miplayer 已被 await，默认不再丢弃句首。
 export VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS="${VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS:-0}"
+# ACK 前缀剥离后少于该字符数则认为不是有效问题，继续等待用户提问。
+export VOICE_GATEWAY_MIN_QUESTION_TEXT_CHARS="${VOICE_GATEWAY_MIN_QUESTION_TEXT_CHARS:-2}"
 # sherpa-onnx 中文 ASR 模型目录，需包含 model.int8.onnx 和 tokens.txt。
 export VOICE_GATEWAY_SHERPA_MODEL_DIR="${VOICE_GATEWAY_SHERPA_MODEL_DIR:-$PROJECT_ROOT/models/sherpa-onnx-paraformer-zh-2024-03-09}"
 # Silero VAD 模型文件路径，用于从音箱音频流中切分用户语音。
