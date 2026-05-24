@@ -18,6 +18,7 @@
 - [2-poc](./2-poc/README.md) 负责完成可行性验证，证明关键链路能跑通。
 - [3-design](./3-design/DESIGN.md) 负责正向设计，指导工程实现。
 - [4-ops](./4-ops/README.md) 负责最小闭环后的日志、监控、告警和排障设计。
+- [5-fast](./5-fast/README.md) 负责端到端性能优化路径。
 
 目录名中的 `1-`、`2-`、`3-`、`4-` 表示工程开展顺序，也表示读者的推荐阅读顺序。
 
@@ -53,7 +54,7 @@ PoC 的目标是 `make it possible`。
 
 当前 PoC 已验证过的方向包括：
 
-- 音箱刷写补丁后可以运行 open-xiaoai client。
+- 音箱按 open-xiaoai 指引刷写补丁后，可以运行 speaker client。
 - 音箱可以连接 Mac Mini 上的 server。
 - Mac Mini 可以调用 Hermes。
 - 3-* legacy route 可以通过小米云 ASR 文本触发 Hermes，并作为手动回滚方案保留。
@@ -93,6 +94,7 @@ Step 1      make run
 Step 2-7    make right
 Step 8      make fast
 Step 9      security & privacy
+Step 10     speaker client and KWS
 ```
 
 这不是口号，而是任务拆分原则。
@@ -375,7 +377,39 @@ Step 9 单独收口安全和隐私。
 - 敏感动作会记录审计事件。
 - 日志不会长期保存未脱敏的完整用户原话。
 
-## 7. 每个步骤的完成定义
+## 7. Step 10：speaker client and KWS
+
+Step 10 收口刷机之后的音箱运行侧能力，让 `voice-gateway` 工程可以独立完成：
+
+```text
+按 open-xiaoai 指引完成刷机
+  -> 音箱端 client 构建
+  -> 音箱端 client 安装
+  -> server 地址配置
+  -> 设备端 KWS 安装
+  -> 开机自启动
+  -> 端到端链路验证
+```
+
+设计见：[08 音箱端 Client 与 KWS](./3-design/08-device-lifecycle.md)。
+
+关键工作：
+
+- 迁移或重写音箱端 Rust client。
+- 提供 `build-speaker-client`、`install-speaker-client`、`configure-speaker-client`、`install-speaker-kws` 和 `validate-speaker-e2e` 脚本。
+- 将设备端 KWS 纳入正式能力。
+- 建立设备侧产物 manifest，记录 client 和 KWS artifact 版本。
+- 刷机和固件 patch 不迁移到 `voice-gateway`，只链接到原 [open-xiaoai](https://github.com/idootop/open-xiaoai) 仓库。
+
+验收标准示例：
+
+- 不进入 `open-xiaoai/` 目录也能完成音箱端 client 构建和安装。
+- 不运行 `open-xiaoai` 脚本也能完成 server 地址配置和开机自启动。
+- 刷机前置步骤明确指引到原 open-xiaoai 仓库。
+- 设备端 KWS 能安装、启动、上报命中事件。
+- 一条验证命令能确认音箱连接、音频流、Hermes、TTS 和播放链路。
+
+## 8. 每个步骤的完成定义
 
 无论是哪一步，都必须满足统一完成定义：
 
@@ -390,7 +424,7 @@ Step 9 单独收口安全和隐私。
 
 如果一个步骤无法在合理时间内完成，应该继续拆小，而不是把多个未完成能力堆在同一个阶段里。
 
-## 8. 总结
+## 9. 总结
 
 `voice-gateway` 的开发不是从零设计一个完美系统，而是从已经验证过的 PoC 出发，把可行链路逐步工程化。
 
@@ -409,6 +443,7 @@ make run
   -> make right
   -> make fast
   -> security & privacy
+  -> device lifecycle
 ```
 
 这样可以避免单个任务过长，也能保证每个阶段结束时系统都处于可运行、可验证、可继续演进的状态。

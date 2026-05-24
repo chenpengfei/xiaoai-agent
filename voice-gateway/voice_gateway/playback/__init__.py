@@ -3,6 +3,15 @@ from voice_gateway.playback.base import (
     PlaybackManager,
     StaticTTSEngine,
     TTSEngine,
+    build_tts_engine,
+    warm_tts_engine,
 )
 
-__all__ = ["EdgeTTSFileEngine", "PlaybackManager", "StaticTTSEngine", "TTSEngine"]
+__all__ = [
+    "EdgeTTSFileEngine",
+    "PlaybackManager",
+    "StaticTTSEngine",
+    "TTSEngine",
+    "build_tts_engine",
+    "warm_tts_engine",
+]

@@ -4,6 +4,8 @@
 
 它的目标是替代当前偏演示性质的 `open-xiaoai/examples/xiaozhi` 状态机，让小爱音箱退化为麦克风、扬声器和设备控制端，而由 Mac Mini 负责 VAD、ASR、声纹识别、连续对话、自然打断、Hermes 接入和 TTS/播放策略。
 
+`voice-gateway` 运行时不依赖 `open-xiaoai` 的 Python 包、Rust 扩展、虚拟环境或脚本。仓库根目录的 `models/` 是两个工程之外的共享 artifact 目录，当前用于保存 sherpa-onnx ASR 模型；`voice-gateway` 通过 `VOICE_GATEWAY_SHERPA_MODEL_DIR` 引用它。
+
 正式设计方案：
 
 - [Voice Gateway 总设计](./docs/3-design/DESIGN.md)
@@ -17,6 +19,7 @@
 - [05 声纹识别](./docs/3-design/05-speaker-identity.md)
 - [06 TTS 与播放控制](./docs/3-design/06-tts-playback.md)
 - [07 安全与隐私](./docs/3-design/07-security-privacy.md)
+- [08 音箱端 Client 与 KWS](./docs/3-design/08-device-lifecycle.md)
 
 运维设计：
 
@@ -43,7 +46,7 @@ WakeupDetected
 ```text
 voice_gateway/
   app.py                 # MinimalLoopGateway 状态机与离线 CLI
-  adapters/              # OpenXiaoAI 协议归一化与音箱播放控制接口
+  adapters/              # XiaoAI WebSocket/RPC 协议与音箱播放控制接口
   audio/endpointing.py   # 基础能量端点检测
   asr/                   # final ASR 接口、静态测试实现、sherpa-onnx adapter
   hermes/                # OpenAI-compatible Hermes connector
@@ -101,7 +104,8 @@ hermes gateway
 小爱音箱 record stream
   -> voice_gateway.xiaoai_runtime
   -> SherpaOnnxEndpointDetector + SherpaOnnxOfflineASREngine 检测“你好”
-  -> XiaoAIDeviceController(tts_play.sh 随机播放“我在 / 在 / 诶”)
+  -> EdgeTTSFileEngine 随机生成“我在 / 在 / 诶”
+  -> XiaoAIDeviceController(miplayer -f URL)
   -> 下一句用户语音
   -> SherpaOnnxEndpointDetector + SherpaOnnxOfflineASREngine
   -> OpenAICompatibleHermesConnector

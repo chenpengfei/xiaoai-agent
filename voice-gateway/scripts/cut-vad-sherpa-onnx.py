@@ -13,7 +13,7 @@ VOICE_GATEWAY_DIR = Path(__file__).resolve().parents[1]
 ROOT = VOICE_GATEWAY_DIR.parent
 IN_DIR = VOICE_GATEWAY_DIR / "audio-samples" / "utterances-gain12"
 OUT_DIR = VOICE_GATEWAY_DIR / "audio-samples" / "utterances-vad-gain12"
-VAD_MODEL = ROOT / "open-xiaoai" / "examples" / "xiaozhi" / "xiaozhi" / "models" / "silero_vad.onnx"
+VAD_MODEL = ROOT / "voice-gateway" / "config" / "silero_vad.onnx"
 
 
 def read_wave(path: Path) -> tuple[int, np.ndarray]:

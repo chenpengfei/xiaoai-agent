@@ -27,7 +27,7 @@
 
 - gateway 默认只绑定可信局域网地址。
 - 接受音箱连接前应有认证机制。
-- 不把 open-xiaoai 的远程 shell 能力暴露给不可信客户端。
+- 不把 speaker client 的远程 shell 能力暴露给不可信客户端。
 - 只有 gateway 内部可信模块可以调用 `run_shell`。
 - 高权限命令需要明确策略和审计日志。
 
@@ -40,7 +40,7 @@ untrusted client
   -/-> raw audio files
   -/-> speaker profiles
 
-open-xiaoai client
+voice-gateway speaker client
   -> authenticated websocket
   -> limited device RPC
 

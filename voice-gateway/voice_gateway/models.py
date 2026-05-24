@@ -77,6 +77,8 @@ class PlaybackResource:
     channels: Optional[int] = None
     duration_ms: Optional[int] = None
     local_path: Optional[str] = None
+    tts_engine: Optional[str] = None
+    tts_model: Optional[str] = None
 
 
 @dataclass

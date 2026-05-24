@@ -7,7 +7,7 @@ from voice_gateway.models import AudioChunk, PlaybackResource
 
 
 @dataclass(frozen=True)
-class OpenXiaoAIStream:
+class XiaoAIStream:
     tag: str
     payload: bytes
     device_id: str
@@ -15,10 +15,10 @@ class OpenXiaoAIStream:
     timestamp_ms: int
 
 
-class OpenXiaoAIAdapter:
+class XiaoAIProtocolAdapter:
     """Protocol adapter for the small subset needed by the minimal loop."""
 
-    def audio_chunk_from_stream(self, stream: OpenXiaoAIStream) -> Optional[AudioChunk]:
+    def audio_chunk_from_stream(self, stream: XiaoAIStream) -> Optional[AudioChunk]:
         if stream.tag != "record":
             return None
         return AudioChunk(

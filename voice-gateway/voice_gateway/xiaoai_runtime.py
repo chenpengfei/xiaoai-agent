@@ -7,11 +7,13 @@ import random
 import signal
 import sys
 import time
+import uuid
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 from voice_gateway.adapters.xiaoai_device import XiaoAIDeviceController
+from voice_gateway.adapters.xiaoai_ws_server import XiaoAIWebSocketServer
 from voice_gateway.app import MinimalLoopGateway
 from voice_gateway.asr import ASREngine, SherpaOnnxOfflineASREngine, StaticFinalASREngine
 from voice_gateway.audio import EnergyEndpointDetector, SherpaOnnxEndpointDetector
@@ -20,7 +22,7 @@ from voice_gateway.dialogue.triggers import contains_wake_word
 from voice_gateway.hermes import EchoHermesConnector, OpenAICompatibleHermesConnector
 from voice_gateway.models import AudioChunk
 from voice_gateway.observability import JsonLineEventLogger, start_metrics_server
-from voice_gateway.playback import EdgeTTSFileEngine, PlaybackManager, StaticTTSEngine
+from voice_gateway.playback import PlaybackManager, StaticTTSEngine, build_tts_engine, warm_tts_engine
 
 DEFAULT_WAKE_ACK_TEXTS = ("我在", "在", "诶")
 
@@ -172,14 +174,26 @@ class XiaoAIMinimalRuntime:
         ack_ok = False
         if self.device is not None:
             ack_text = random.choice(self.wake_ack_texts)
-            ack_ok = await self.device.play_text(ack_text)
+            error = None
+            try:
+                ack_id = f"wake_ack_{uuid.uuid4().hex}"
+                await self.gateway.playback.speak(
+                    ack_text,
+                    device_id=self.device_id,
+                    conversation_id=ack_id,
+                    turn_id=ack_id,
+                )
+                ack_ok = True
+            except Exception as exc:
+                error = str(exc)
             self.gateway.events.emit(
                 "wake_ack.sent",
                 device_id=self.device_id,
                 wake_word=self.wake_word,
-                method="speaker_text_tts",
+                method="edge_tts_url",
                 text=ack_text,
                 ok=ack_ok,
+                error=error,
             )
         self._drain_queue()
         # Only suppress microphone audio when the speaker actually played an
@@ -256,7 +270,7 @@ class XiaoAIMinimalRuntime:
 
 
 async def run_server(args: argparse.Namespace) -> int:
-    open_xiaoai_server = _import_open_xiaoai_server(Path(args.xiaozhi_dir))
+    xiaoai_server = XiaoAIWebSocketServer(host=args.host, port=args.port)
     config = load_config_from_env()
     events = JsonLineEventLogger()
     metrics_server = None
@@ -274,8 +288,9 @@ async def run_server(args: argparse.Namespace) -> int:
     question_endpoint = _build_endpoint(args, config)
 
     hermes = EchoHermesConnector() if args.echo_hermes else OpenAICompatibleHermesConnector(config.hermes)
-    tts = StaticTTSEngine() if args.no_tts else EdgeTTSFileEngine(config.tts)
-    device = None if args.no_device_playback else XiaoAIDeviceController(open_xiaoai_server)
+    tts = StaticTTSEngine() if args.no_tts else build_tts_engine(config.tts)
+    await warm_tts_engine(tts)
+    device = None if args.no_device_playback else XiaoAIDeviceController(xiaoai_server)
     playback = PlaybackManager(tts=tts, device=device, events=events)
     gateway = MinimalLoopGateway(
         device_id=args.device_id,
@@ -298,8 +313,13 @@ async def run_server(args: argparse.Namespace) -> int:
     )
 
     loop = asyncio.get_running_loop()
-    open_xiaoai_server.register_fn("on_input_data", lambda data: runtime.on_input_data_threadsafe(loop, data))
-    open_xiaoai_server.register_fn("on_event", lambda event: None)
+    xiaoai_server.register_fn("on_input_data", lambda data: runtime.on_input_data_threadsafe(loop, data))
+    xiaoai_server.register_fn("on_event", lambda event: None)
+    if device is not None:
+        xiaoai_server.register_fn(
+            "on_connected",
+            lambda: _play_connected_prompt(gateway, args.device_id),
+        )
     await runtime.start()
 
     stop_event = asyncio.Event()
@@ -310,19 +330,17 @@ async def run_server(args: argparse.Namespace) -> int:
             pass
 
     print(
-        "voice-gateway XiaoAI minimal runtime listening via open_xiaoai_server "
-        f"device_id={args.device_id} wake_word={args.wake_word!r}",
+        "voice-gateway XiaoAI minimal runtime listening "
+        f"host={args.host} port={args.port} device_id={args.device_id} wake_word={args.wake_word!r}",
         file=sys.stderr,
     )
-    # open_xiaoai_server.start_server() is provided by the PyO3 extension and
-    # returns an asyncio Future, not a native coroutine.  Use ensure_future so
-    # both Future and coroutine implementations are accepted.
-    server_task = asyncio.ensure_future(open_xiaoai_server.start_server())
+    server_task = asyncio.create_task(xiaoai_server.start_server())
     stop_task = asyncio.create_task(stop_event.wait())
     done, pending = await asyncio.wait({server_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
         task.cancel()
     await runtime.stop()
+    await xiaoai_server.stop()
     for task in done:
         if task is server_task:
             await task
@@ -331,9 +349,35 @@ async def run_server(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _play_connected_prompt(gateway: MinimalLoopGateway, device_id: str) -> None:
+    connection_id = f"device_connected_{uuid.uuid4().hex}"
+    text = "已连接"
+    error = None
+    ok = False
+    try:
+        await gateway.playback.speak(
+            text,
+            device_id=device_id,
+            conversation_id=connection_id,
+            turn_id=connection_id,
+        )
+        ok = True
+    except Exception as exc:
+        error = str(exc)
+    gateway.events.emit(
+        "device.connected",
+        device_id=device_id,
+        text=text,
+        method="edge_tts_url",
+        ok=ok,
+        error=error,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run voice-gateway minimal loop against a real XiaoAI speaker.")
-    parser.add_argument("--xiaozhi-dir", default="../open-xiaoai/examples/xiaozhi")
+    parser.add_argument("--host", default=os.getenv("VOICE_GATEWAY_HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("VOICE_GATEWAY_PORT", "4399")))
     parser.add_argument("--device-id", default=os.getenv("VOICE_GATEWAY_DEVICE_ID", "xiaoai-speaker"))
     parser.add_argument("--wake-word", default=os.getenv("VOICE_GATEWAY_WAKE_WORD", "你好"))
     parser.add_argument(
@@ -384,15 +428,6 @@ def _build_endpoint(args: argparse.Namespace, config):
         max_speech_seconds=float(os.getenv("VOICE_GATEWAY_MAX_SPEECH_SECONDS", "8")),
         pre_roll_seconds=float(os.getenv("VOICE_GATEWAY_VAD_PRE_ROLL_SECONDS", "0.8")),
     )
-
-
-def _import_open_xiaoai_server(xiaozhi_dir: Path):
-    path = _abs_path(xiaozhi_dir)
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-    import open_xiaoai_server
-
-    return open_xiaoai_server
 
 
 def _abs_path(path: Path) -> Path:

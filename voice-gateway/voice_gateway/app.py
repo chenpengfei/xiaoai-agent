@@ -17,7 +17,7 @@ from voice_gateway.hermes.openai_compatible import OpenAICompatibleHermesConnect
 from voice_gateway.models import ASRResult, AudioChunk, DialogueState, HermesResponse, HermesTurn, Turn
 from voice_gateway.observability.events import EventLogger, JsonLineEventLogger
 from voice_gateway.observability.tracing import SpanHandle, TraceManager
-from voice_gateway.playback.base import EdgeTTSFileEngine, PlaybackManager, StaticTTSEngine
+from voice_gateway.playback.base import PlaybackManager, StaticTTSEngine, build_tts_engine, warm_tts_engine
 
 
 class MinimalLoopGateway:
@@ -570,7 +570,8 @@ async def run_offline_demo(args: argparse.Namespace) -> int:
     events = JsonLineEventLogger()
     asr = StaticFinalASREngine(args.asr_text)
     hermes: HermesConnector = EchoHermesConnector() if args.echo_hermes else OpenAICompatibleHermesConnector(config.hermes)
-    tts = StaticTTSEngine() if args.no_tts else EdgeTTSFileEngine(config.tts)
+    tts = StaticTTSEngine() if args.no_tts else build_tts_engine(config.tts)
+    await warm_tts_engine(tts)
     playback = PlaybackManager(tts=tts, device=None, events=events)
     gateway = MinimalLoopGateway(
         device_id=args.device_id,

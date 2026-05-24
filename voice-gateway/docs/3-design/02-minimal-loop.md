@@ -32,7 +32,7 @@
 ## 3. 启用模块
 
 ```text
-OpenXiaoAIAdapter
+XiaoAIProtocolAdapter
 AudioIngest
 VAD / Endpointing
 ASR Pipeline
@@ -76,7 +76,7 @@ SPEAKING
 
 ## 5. 音频输入
 
-音箱通过 open-xiaoai client 持续发送：
+音箱通过 voice-gateway speaker client 持续发送：
 
 ```text
 Stream(tag="record", bytes=pcm)

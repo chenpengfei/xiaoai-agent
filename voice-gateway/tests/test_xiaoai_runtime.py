@@ -9,7 +9,7 @@ from voice_gateway.hermes import StaticHermesConnector
 from voice_gateway.models import AudioWindow
 from voice_gateway.observability import InMemoryEventLogger
 from voice_gateway.playback import PlaybackManager, StaticTTSEngine
-from voice_gateway.xiaoai_runtime import RuntimeState, XiaoAIMinimalRuntime
+from voice_gateway.xiaoai_runtime import RuntimeState, XiaoAIMinimalRuntime, _play_connected_prompt
 
 
 class RaisingEndpoint:
@@ -38,14 +38,13 @@ class OneShotEndpoint:
         ]
 
 
-class FakeTextAckDevice:
-    def __init__(self, ok=True):
-        self.ok = ok
-        self.texts = []
+class RejectingDeviceController:
+    def __init__(self):
+        self.played = []
 
-    async def play_text(self, text, *, timeout_ms=60000):
-        self.texts.append({"text": text, "timeout_ms": timeout_ms})
-        return self.ok
+    async def play_audio_resource(self, resource):
+        self.played.append(resource)
+        return False
 
 
 class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
@@ -84,7 +83,6 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def test_wake_word_sends_text_ack_then_next_utterance_to_hermes(self):
         events = InMemoryEventLogger()
         hermes = StaticHermesConnector("我是小马。")
-        device = FakeTextAckDevice()
         playback_device = InMemoryDeviceController()
         gateway = MinimalLoopGateway(
             device_id="speaker-1",
@@ -103,7 +101,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             device_id="speaker-1",
             wake_asr=StaticFinalASREngine("你好"),
             wake_endpoint=OneShotEndpoint(),
-            device=device,
+            device=playback_device,
             wake_word="你好",
             wake_ack_texts=("在",),
             ack_suppression_seconds=0,
@@ -114,7 +112,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         assert runtime.state == RuntimeState.WAIT_QUESTION
-        assert device.texts == [{"text": "在", "timeout_ms": 60000}]
+        assert len(playback_device.played) == 1
         assert hermes.turns == []
 
         runtime._put_nowait(b"\x02\x00" * 480)
@@ -123,21 +121,21 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
         assert runtime.state == RuntimeState.WAIT_WAKE_WORD
         assert len(hermes.turns) == 1
         assert hermes.turns[0].user_text == "你是谁"
-        assert len(playback_device.played) == 1
+        assert len(playback_device.played) == 2
 
         await runtime.stop()
 
     async def test_failed_wake_ack_does_not_suppress_question_audio(self):
         events = InMemoryEventLogger()
         hermes = StaticHermesConnector("我是小马。")
-        device = FakeTextAckDevice(ok=False)
+        device = RejectingDeviceController()
         gateway = MinimalLoopGateway(
             device_id="speaker-1",
             asr=StaticFinalASREngine("我家里有几个人"),
             hermes=hermes,
             playback=PlaybackManager(
                 tts=StaticTTSEngine(),
-                device=InMemoryDeviceController(),
+                device=device,
                 events=events,
             ),
             endpoint=OneShotEndpoint(),
@@ -169,6 +167,31 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
         assert hermes.turns[0].user_text == "我家里有几个人"
 
         await runtime.stop()
+
+    async def test_connected_prompt_plays_connected_text(self):
+        events = InMemoryEventLogger()
+        device = InMemoryDeviceController()
+        tts = StaticTTSEngine()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=StaticFinalASREngine(""),
+            hermes=StaticHermesConnector(""),
+            playback=PlaybackManager(
+                tts=tts,
+                device=device,
+                events=events,
+            ),
+            endpoint=OneShotEndpoint(),
+            events=events,
+        )
+
+        await _play_connected_prompt(gateway, "speaker-1")
+
+        assert tts.texts == ["已连接"]
+        assert len(device.played) == 1
+        connected = next(event for event in events.events if event.event == "device.connected")
+        assert connected.fields["text"] == "已连接"
+        assert connected.fields["ok"] is True
 
 
 if __name__ == "__main__":

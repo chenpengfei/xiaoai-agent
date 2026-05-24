@@ -38,7 +38,7 @@ class GatewayConfig:
     hermes: HermesConfig = HermesConfig()
     tts: TTSConfig = TTSConfig()
     sherpa_model_dir: Path = Path("../models/sherpa-onnx-paraformer-zh-2024-03-09")
-    silero_vad_model: Path = Path("../open-xiaoai/examples/xiaozhi/xiaozhi/models/silero_vad.onnx")
+    silero_vad_model: Path = Path("config/silero_vad.onnx")
 
 
 def load_config_from_env() -> GatewayConfig:
@@ -66,6 +66,6 @@ def load_config_from_env() -> GatewayConfig:
             os.getenv("VOICE_GATEWAY_SHERPA_MODEL_DIR", "../models/sherpa-onnx-paraformer-zh-2024-03-09")
         ),
         silero_vad_model=Path(
-            os.getenv("VOICE_GATEWAY_SILERO_VAD_MODEL", "../open-xiaoai/examples/xiaozhi/xiaozhi/models/silero_vad.onnx")
+            os.getenv("VOICE_GATEWAY_SILERO_VAD_MODEL", "config/silero_vad.onnx")
         ),
     )

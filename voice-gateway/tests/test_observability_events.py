@@ -43,6 +43,23 @@ def test_metrics_registry_tracks_turn_summary():
     assert 'voice_gateway_turn_slowest_stage_count{stage="hermes"} 1' in rendered
 
 
+def test_metrics_registry_tracks_tts_latency():
+    metrics = MetricsRegistry()
+
+    metrics.observe_event(
+        "tts.completed",
+        {
+            "level": "info",
+            "latency_ms": 42,
+        },
+    )
+
+    rendered = metrics.render_prometheus()
+    assert "voice_gateway_tts_latency_ms_sum 42" in rendered
+    assert "voice_gateway_tts_fallback_total" not in rendered
+    assert "voice_gateway_tts_cache_hit_total" not in rendered
+
+
 def test_metrics_registry_uses_finite_age_before_first_event():
     metrics = MetricsRegistry()
 

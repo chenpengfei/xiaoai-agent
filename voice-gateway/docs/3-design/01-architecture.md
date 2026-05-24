@@ -8,7 +8,9 @@
 
 `voice-gateway` 运行在 Mac Mini 上，承接音箱传来的麦克风音频流，并负责语音理解、对话状态、Hermes 调用和播放控制。
 
-音箱侧仍运行 open-xiaoai Rust client。音箱负责：
+当前音箱侧运行已验证过的 Rust client 协议；长期目标是把刷机后的音箱端 client、安装脚本和设备端 KWS 收口到 `voice-gateway` 工程。刷机和固件 patch 继续指引到原 [open-xiaoai](https://github.com/idootop/open-xiaoai) 仓库，详见 [08 音箱端 Client 与 KWS](./08-device-lifecycle.md)。
+
+音箱侧 client 负责：
 
 - 建立 WebSocket 连接。
 - 执行 `start_recording`、`start_play`、`stop_play`、`run_shell` 等 RPC。
@@ -32,8 +34,8 @@ Mac Mini 侧负责：
 ## 2. 模块图
 
 ```text
-小爱音箱 / open-xiaoai client
-  -> OpenXiaoAIAdapter
+小爱音箱 / XiaoAI device client
+  -> XiaoAIProtocolAdapter
   -> AudioIngest
   -> VAD / Endpointing
   -> ASR Pipeline
@@ -42,11 +44,11 @@ Mac Mini 侧负责：
   -> TTSEngine
   -> PlaybackManager
   -> DeviceController
-  -> OpenXiaoAIAdapter
+  -> XiaoAIProtocolAdapter
   -> 小爱音箱播放
 
 DeviceStateChanged
-  -> OpenXiaoAIAdapter
+  -> XiaoAIProtocolAdapter
   -> DialogueStateMachine
 
 AudioWindow
@@ -58,7 +60,7 @@ PlaybackManager
   -> DialogueStateMachine
 ```
 
-## 3. OpenXiaoAIAdapter
+## 3. XiaoAIProtocolAdapter
 
 负责 Mac Mini 与音箱之间的传输协议。
 

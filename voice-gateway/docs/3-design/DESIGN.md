@@ -37,7 +37,8 @@
 5. [05 声纹识别](./05-speaker-identity.md)
 6. [06 TTS 与播放控制](./06-tts-playback.md)
 7. [07 安全与隐私](./07-security-privacy.md)
-8. [运维设计：可观测性、日志、监控与告警](../4-ops/README.md)
+8. [08 音箱端 Client 与 KWS](./08-device-lifecycle.md)
+9. [运维设计：可观测性、日志、监控与告警](../4-ops/README.md)
 
 ## 3. 阶段关系
 
@@ -63,6 +64,9 @@
 07 安全与隐私
   -> 定义网络边界、设备认证、权限策略和隐私保护原则
 
+08 音箱端 Client 与 KWS
+  -> 定义刷机后音箱端 client、设备端 KWS、安装配置和验证边界
+
 4 Ops 运维设计
   -> 定义结构化事件、日志、指标、trace、告警和故障诊断策略
 ```
@@ -71,7 +75,7 @@
 
 ```text
 voice-gateway
-  OpenXiaoAIAdapter
+  XiaoAIProtocolAdapter
   AudioIngest
   VAD / Endpointing
   ASR Pipeline
@@ -106,6 +110,7 @@ xiaoai-agent/
         05-speaker-identity.md
         06-tts-playback.md
         07-security-privacy.md
+        08-device-lifecycle.md
       4-ops/
         README.md
         01-observability.md
@@ -116,6 +121,15 @@ xiaoai-agent/
         06-grafana-loki-tempo-alloy.md
         07-ops-runbook.md
     pyproject.toml
+    device/
+      client-rust/
+      kws/
+    scripts/
+      build-speaker-client.sh
+      install-speaker-client.sh
+      configure-speaker-client.sh
+      install-speaker-kws.sh
+      validate-speaker-e2e.sh
     voice_gateway/
       __init__.py
       app.py
@@ -127,6 +141,7 @@ xiaoai-agent/
       dialogue/
       hermes/
       playback/
+      device/
       observability/
     tests/
 ```

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import subprocess
 import sys
 import time
@@ -8,12 +9,15 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Protocol
+from urllib.parse import quote
 
 from voice_gateway.adapters.base import DeviceController, InMemoryDeviceController
 from voice_gateway.config import TTSConfig
 from voice_gateway.models import PlaybackResource
 from voice_gateway.observability.events import EventLogger, JsonLineEventLogger
 from voice_gateway.observability.tracing import SpanHandle, TraceManager
+
+DEFAULT_CACHED_TTS_TEXTS = ("我在", "在", "诶", "已连接")
 
 
 class TTSEngine(Protocol):
@@ -33,23 +37,35 @@ class StaticTTSEngine:
 
 
 class EdgeTTSFileEngine:
-    def __init__(self, config: TTSConfig = TTSConfig()) -> None:
+    engine_name = "edge"
+    model_name = "edge-tts"
+
+    def __init__(
+        self,
+        config: TTSConfig = TTSConfig(),
+        *,
+        cached_texts: tuple[str, ...] = DEFAULT_CACHED_TTS_TEXTS,
+    ) -> None:
         self.config = config
+        self.cached_texts = tuple(text for text in cached_texts if text)
 
     async def synthesize_file(self, text: str) -> PlaybackResource:
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         playback_id = f"p_{uuid.uuid4().hex}"
-        name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{playback_id}.mp3"
-        path = self.config.output_dir / name
+        path = self._path_for_text(text, playback_id)
         started = time.perf_counter()
-        await asyncio.to_thread(self._run_edge_tts, text, path)
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(self._run_edge_tts, text, path)
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         return PlaybackResource(
             playback_id=playback_id,
-            url=f"{self.config.http_base_url}/{path.name}",
+            url=f"{self.config.http_base_url}/{_relative_url_path(self.config.output_dir, path)}",
             format="mp3",
             duration_ms=elapsed_ms,
             local_path=str(path),
+            tts_engine=self.engine_name,
+            tts_model=self.config.voice,
         )
 
     def _run_edge_tts(self, text: str, path: Path) -> None:
@@ -76,6 +92,32 @@ class EdgeTTSFileEngine:
         except subprocess.CalledProcessError as exc:
             details = (exc.stderr or exc.stdout or str(exc)).strip()
             raise RuntimeError(f"edge-tts failed with exit code {exc.returncode}: {details}") from exc
+
+    async def warm_cache(self) -> None:
+        for text in self.cached_texts:
+            await self.synthesize_file(text)
+
+    def _path_for_text(self, text: str, playback_id: str) -> Path:
+        if text in self.cached_texts:
+            digest = hashlib.sha256(
+                f"{self.config.voice}\n{self.config.rate}\n{text}".encode("utf-8")
+            ).hexdigest()[:16]
+            return self.config.output_dir / "cache" / f"edge-{digest}.mp3"
+        name = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{playback_id}.mp3"
+        return self.config.output_dir / name
+
+
+def build_tts_engine(config: TTSConfig) -> TTSEngine:
+    return EdgeTTSFileEngine(config)
+
+
+async def warm_tts_engine(engine: TTSEngine) -> None:
+    warm_cache = getattr(engine, "warm_cache", None)
+    if warm_cache is not None:
+        try:
+            await warm_cache()
+        except Exception as exc:
+            print(f"TTS cache warm failed: {exc}", file=sys.stderr)
 
 
 class PlaybackManager:
@@ -131,6 +173,10 @@ class PlaybackManager:
         if tts_span is not None:
             tts_span.set_attribute("duration_ms", tts_latency_ms)
             tts_span.set_attribute("playback_id", resource.playback_id)
+            if resource.tts_engine:
+                tts_span.set_attribute("tts.engine", resource.tts_engine)
+            if resource.tts_model:
+                tts_span.set_attribute("tts.model", resource.tts_model)
             tts_span.end()
         self.events.emit(
             "tts.completed",
@@ -138,6 +184,11 @@ class PlaybackManager:
             **event_fields,
             playback_id=resource.playback_id,
             latency_ms=tts_latency_ms,
+            engine=resource.tts_engine,
+            model=resource.tts_model,
+            format=resource.format,
+            text_chars=len(text),
+            local_path=resource.local_path,
         )
 
         playback_span = tracing.start_child_span("playback", parent_span, event_fields) if tracing is not None else None
@@ -184,3 +235,11 @@ class PlaybackManager:
 
 def _new_span_id() -> str:
     return uuid.uuid4().hex[:16]
+
+
+def _relative_url_path(root: Path, path: Path) -> str:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        relative = Path(path.name)
+    return quote(relative.as_posix())

@@ -28,6 +28,7 @@
 - [4.3-mac-mini-stt.md](./4.3-mac-mini-stt.md)：步骤 4.3，Mac Mini STT 验证。
 - [4.4-mac-mini-tts-playback.md](./4.4-mac-mini-tts-playback.md)：步骤 4.4，Mac Mini TTS 和音频回传验证。
 - [4.5-end-to-end-local-hermes.md](./4.5-end-to-end-local-hermes.md)：步骤 4.5，端到端 Hermes 完全接管验证。
+- [5-tts-quality-comparison.md](./5-tts-quality-comparison.md)：步骤 5，Edge TTS 与小米原生 TTS 的长文本播放效果对比。
 - [n-current-status.md](./n-current-status.md)：动态进度，记录哪些步骤已完成、下一步做什么。
 
 ## 当前状态摘要

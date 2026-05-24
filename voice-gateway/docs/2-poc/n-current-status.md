@@ -174,7 +174,7 @@ runtime fallback: 当前不做自动切回小米云 ASR
 
 - Mac Mini 可以生成 TTS 音频。
 - TTS URL 已经可以被音箱播放。
-- `speaker.play(text=...)` 仅作为 3-* legacy route 的文字播报能力保留。
+- `speaker.play(text=...)` / `tts_play.sh` 已退出 `voice-gateway` 运行时 TTS 路径。
 
 ### 4.5 端到端 Hermes 完全接管验证
 

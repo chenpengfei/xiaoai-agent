@@ -23,6 +23,7 @@ class MetricsRegistry:
         self.runtime_worker_failure_total = 0
         self.hermes_failure_total = 0
         self.tts_failure_total = 0
+        self.tts_latency_ms: list[int] = []
         self.playback_failure_total = 0
         self.asr_empty_total = 0
         self.last_event_seen = 0.0
@@ -45,6 +46,10 @@ class MetricsRegistry:
                 self.hermes_failure_total += 1
             elif event == "tts.failed":
                 self.tts_failure_total += 1
+            elif event == "tts.completed":
+                latency_ms = fields.get("latency_ms")
+                if isinstance(latency_ms, int):
+                    self.tts_latency_ms.append(latency_ms)
             elif event == "playback.failed":
                 self.playback_failure_total += 1
             elif event in {"turn.completed", "turn.failed"}:
@@ -112,6 +117,7 @@ class MetricsRegistry:
                 f"voice_gateway_playback_failure_total {self.playback_failure_total}",
             ]
             lines.extend(_summary("voice_gateway_turn_duration_ms", self.turn_duration_ms))
+            lines.extend(_summary("voice_gateway_tts_latency_ms", self.tts_latency_ms))
             for stage, values in sorted(self.stage_duration_ms.items()):
                 lines.extend(_summary("voice_gateway_turn_stage_duration_ms", values, {"stage": stage}))
             lines.append("# HELP voice_gateway_turn_slowest_stage_count Slowest stage counts.")
