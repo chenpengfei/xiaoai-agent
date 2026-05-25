@@ -36,10 +36,10 @@ run_scp() {
 }
 
 run_ssh "mkdir -p '$REMOTE_KWS_DIR'"
-run_scp "$VOICE_GATEWAY_DIR/device/kws/init.sh" "$REMOTE:$REMOTE_KWS_DIR/init.sh"
-run_scp "$VOICE_GATEWAY_DIR/device/kws/boot.sh" "$REMOTE:$REMOTE_KWS_DIR/boot.sh"
-run_scp "$VOICE_GATEWAY_DIR/device/kws/debug.sh" "$REMOTE:$REMOTE_KWS_DIR/debug.sh"
-run_scp "$VOICE_GATEWAY_DIR/device/kws/keywords.txt" "$REMOTE:$REMOTE_KWS_DIR/keywords.txt"
+run_scp "$VOICE_GATEWAY_DIR/client/kws/init.sh" "$REMOTE:$REMOTE_KWS_DIR/init.sh"
+run_scp "$VOICE_GATEWAY_DIR/client/kws/boot.sh" "$REMOTE:$REMOTE_KWS_DIR/boot.sh"
+run_scp "$VOICE_GATEWAY_DIR/client/kws/debug.sh" "$REMOTE:$REMOTE_KWS_DIR/debug.sh"
+run_scp "$VOICE_GATEWAY_DIR/client/kws/keywords.txt" "$REMOTE:$REMOTE_KWS_DIR/keywords.txt"
 
 if [[ -n "$KWS_ARTIFACT_DIR" ]]; then
   if [[ ! -d "$KWS_ARTIFACT_DIR" ]]; then

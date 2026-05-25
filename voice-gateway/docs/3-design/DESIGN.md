@@ -132,7 +132,7 @@ xiaoai-agent/
         06-grafana-loki-tempo-alloy.md
         07-ops-runbook.md
     pyproject.toml
-    device/
+    client/
       client-rust/
       kws/
     scripts/
@@ -141,7 +141,7 @@ xiaoai-agent/
       configure-speaker-client.sh
       install-speaker-kws.sh
       validate-speaker-e2e.sh
-    voice_gateway/
+    server/
       __init__.py
       app.py
       config.py
@@ -152,7 +152,6 @@ xiaoai-agent/
       dialogue/
       hermes/
       playback/
-      device/
       observability/
     tests/
 ```

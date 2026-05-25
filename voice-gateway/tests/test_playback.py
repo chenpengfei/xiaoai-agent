@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from voice_gateway.config import TTSConfig
-from voice_gateway.playback import EdgeTTSFileEngine, PlaybackManager, build_tts_engine
-from voice_gateway.playback.base import DEFAULT_CACHED_TTS_TEXTS
+from server.config import TTSConfig
+from server.playback import EdgeTTSFileEngine, PlaybackManager, build_tts_engine
+from server.playback.base import DEFAULT_CACHED_TTS_TEXTS
 
 
 def asyncio_run(coro):

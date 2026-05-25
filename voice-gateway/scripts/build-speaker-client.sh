@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VOICE_GATEWAY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CLIENT_DIR="$VOICE_GATEWAY_DIR/device/client-rust"
+CLIENT_DIR="$VOICE_GATEWAY_DIR/client/client-rust"
 
 TARGET="${VOICE_GATEWAY_CLIENT_TARGET:-armv7-unknown-linux-gnueabihf}"
 BUILD_TOOL="${VOICE_GATEWAY_CLIENT_BUILD_TOOL:-cross}"

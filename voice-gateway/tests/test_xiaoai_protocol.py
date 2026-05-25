@@ -1,7 +1,7 @@
 import unittest
 
-from voice_gateway.adapters import XiaoAIProtocolAdapter, XiaoAIStream
-from voice_gateway.models import PlaybackResource
+from server.adapters import XiaoAIProtocolAdapter, XiaoAIStream
+from server.models import PlaybackResource
 
 
 class XiaoAIProtocolAdapterTest(unittest.TestCase):

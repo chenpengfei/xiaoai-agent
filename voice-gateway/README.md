@@ -44,7 +44,7 @@ WakeupDetected
 核心代码在：
 
 ```text
-voice_gateway/
+server/
   app.py                 # MinimalLoopGateway 状态机与离线 CLI
   adapters/              # XiaoAI WebSocket/RPC 协议与音箱播放控制接口
   audio/endpointing.py   # 基础能量端点检测
@@ -64,7 +64,7 @@ python3 -m unittest discover -s tests
 离线试跑一个 WAV，可先用静态 ASR、Echo Hermes 和内存播放资源验证状态机：
 
 ```sh
-python3 -m voice_gateway.app \
+python3 -m server.app \
   --wav /path/to/16k-mono-s16le.wav \
   --asr-text "你好你是谁" \
   --echo-hermes \
@@ -111,7 +111,7 @@ VOICE_GATEWAY_SPEAKER_PASSWORD=open-xiaoai ./scripts/sync-speaker-network.sh
 
 ```text
 小爱音箱 record stream
-  -> voice_gateway.xiaoai_runtime
+  -> server.xiaoai_runtime
   -> SherpaOnnxEndpointDetector + SherpaOnnxOfflineASREngine 检测“你好”
   -> EdgeTTSFileEngine 随机生成“我在 / 在 / 诶”
   -> XiaoAIDeviceController(miplayer -f URL)

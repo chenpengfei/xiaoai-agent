@@ -39,8 +39,8 @@ run_scp() {
 }
 
 run_ssh "mkdir -p '$REMOTE_DIR'"
-run_scp "$VOICE_GATEWAY_DIR/device/client-rust/init.sh" "$REMOTE:$REMOTE_DIR/init.sh"
-run_scp "$VOICE_GATEWAY_DIR/device/client-rust/boot.sh" "$REMOTE:$REMOTE_DIR/boot.sh"
+run_scp "$VOICE_GATEWAY_DIR/client/client-rust/init.sh" "$REMOTE:$REMOTE_DIR/init.sh"
+run_scp "$VOICE_GATEWAY_DIR/client/client-rust/boot.sh" "$REMOTE:$REMOTE_DIR/boot.sh"
 run_ssh "printf '%s\n' '$SERVER_URL' > '$REMOTE_DIR/server.txt' && chmod +x '$REMOTE_DIR/init.sh' '$REMOTE_DIR/boot.sh' && cp '$REMOTE_DIR/boot.sh' /data/init.sh && chmod +x /data/init.sh"
 
 echo "configured speaker client:"

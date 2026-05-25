@@ -1,7 +1,7 @@
 import unittest
 
-from voice_gateway.dialogue.triggers import contains_wake_word, extract_nihao_question, xiaoai_question_from_asr
-from voice_gateway.models import ASRResult
+from server.dialogue.triggers import contains_wake_word, extract_nihao_question, xiaoai_question_from_asr
+from server.models import ASRResult
 
 
 def asr(text: str) -> ASRResult:

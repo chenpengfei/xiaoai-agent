@@ -24,7 +24,7 @@
 
 ```text
 voice-gateway/
-  device/
+  client/
     README.md
     client-rust/
       Cargo.toml
@@ -48,7 +48,7 @@ voice-gateway/
     validate-speaker-e2e.sh
 ```
 
-根目录 `models/` 继续作为两个工程之外的共享 artifact，不迁入 `device/`。
+根目录 `models/` 继续作为两个工程之外的共享 artifact，不迁入 `client/`。
 
 ## 3. 音箱端 Client
 
@@ -63,13 +63,13 @@ voice-gateway/
 目标路径：
 
 ```text
-voice-gateway/device/client-rust
+voice-gateway/client/client-rust
 ```
 
 验收标准：
 
 - Rust crate 不依赖 `open-xiaoai`。
-- 与 `voice_gateway.adapters.xiaoai_ws_server` 的协议互通。
+- 与 `server.adapters.xiaoai_ws_server` 的协议互通。
 - 支持配置 server 地址。
 - 支持断线重连。
 - 支持安装到 `/data/voice-gateway/client`。
@@ -82,7 +82,7 @@ voice-gateway/device/client-rust
 目标路径：
 
 ```text
-voice-gateway/device/kws
+voice-gateway/client/kws
 ```
 
 验收标准：

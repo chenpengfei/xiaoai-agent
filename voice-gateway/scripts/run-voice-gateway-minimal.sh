@@ -51,7 +51,7 @@ export VOICE_GATEWAY_PORT="${VOICE_GATEWAY_PORT:-4399}"
 # 唤醒后等待用户正式提问的最长时间，单位为秒。
 export VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS="${VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS:-5}"
 # 回答播放结束后的免唤醒追问窗口，单位为秒；设为 0 可关闭连续对话。
-export VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS="${VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS:-10}"
+export VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS="${VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS:-5}"
 # 播放唤醒提示短语后额外忽略采集音频的时长。miplayer 已被 await，默认不再丢弃句首。
 export VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS="${VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS:-0}"
 # ACK 前缀剥离后少于该字符数则认为不是有效问题，继续等待用户提问。
@@ -218,6 +218,6 @@ echo "tts_format: mp3"
 echo "tts_http_base_url: $VOICE_GATEWAY_TTS_HTTP_BASE_URL"
 
 cd "$VOICE_GATEWAY_DIR"
-env PYTHONUNBUFFERED=1 uv run python -m voice_gateway.xiaoai_runtime \
+env PYTHONUNBUFFERED=1 uv run python -m server.xiaoai_runtime \
   --wake-word "$VOICE_GATEWAY_WAKE_WORD" \
   --probe

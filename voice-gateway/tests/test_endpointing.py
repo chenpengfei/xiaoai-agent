@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from voice_gateway.audio import EnergyEndpointDetector, SherpaOnnxEndpointDetector
-from voice_gateway.config import EndpointingConfig
-from voice_gateway.models import AudioChunk
+from server.audio import EnergyEndpointDetector, SherpaOnnxEndpointDetector
+from server.config import EndpointingConfig
+from server.models import AudioChunk
 
 
 def pcm_frame(amplitude: int, frames: int) -> bytes:

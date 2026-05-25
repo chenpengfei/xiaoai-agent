@@ -39,7 +39,7 @@ XiaoAI WS:      tcp/4399
 检查：
 
 ```sh
-pgrep -af 'voice_gateway.xiaoai_runtime'
+pgrep -af 'server.xiaoai_runtime'
 lsof -nP -iTCP:4399 -sTCP:LISTEN
 tail -100 voice-gateway/logs/voice-gateway-minimal.log
 ```

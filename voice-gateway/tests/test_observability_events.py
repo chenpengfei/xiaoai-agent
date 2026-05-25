@@ -4,8 +4,8 @@ from urllib.request import urlopen
 
 import pytest
 
-from voice_gateway.observability import JsonLineEventLogger, runtime_log
-from voice_gateway.observability.metrics import MetricsRegistry, start_metrics_server
+from server.observability import JsonLineEventLogger, runtime_log
+from server.observability.metrics import MetricsRegistry, start_metrics_server
 
 
 def test_json_line_event_logger_writes_events_file(tmp_path):

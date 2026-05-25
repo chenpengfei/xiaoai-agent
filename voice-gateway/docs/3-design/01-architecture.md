@@ -253,7 +253,7 @@ voice-gateway/
   DESIGN.md
   docs/
   pyproject.toml
-  voice_gateway/
+  server/
     adapters/
     audio/
     asr/
@@ -262,5 +262,8 @@ voice-gateway/
     hermes/
     playback/
     observability/
+  client/
+    client-rust/
+    kws/
   tests/
 ```

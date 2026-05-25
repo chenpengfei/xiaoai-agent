@@ -1,14 +1,14 @@
 import unittest
 
-from voice_gateway.adapters import InMemoryDeviceController
-from voice_gateway.app import MinimalLoopGateway
-from voice_gateway.asr import StaticFinalASREngine
-from voice_gateway.audio import EnergyEndpointDetector
-from voice_gateway.config import EndpointingConfig
-from voice_gateway.hermes import StaticHermesConnector
-from voice_gateway.models import AudioChunk, DialogueState
-from voice_gateway.observability import InMemoryEventLogger
-from voice_gateway.playback import PlaybackManager, StaticTTSEngine
+from server.adapters import InMemoryDeviceController
+from server.app import MinimalLoopGateway
+from server.asr import StaticFinalASREngine
+from server.audio import EnergyEndpointDetector
+from server.config import EndpointingConfig
+from server.hermes import StaticHermesConnector
+from server.models import AudioChunk, DialogueState
+from server.observability import InMemoryEventLogger
+from server.playback import PlaybackManager, StaticTTSEngine
 
 
 def pcm_frame(amplitude: int, frames: int) -> bytes:

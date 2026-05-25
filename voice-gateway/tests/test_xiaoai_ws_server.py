@@ -2,7 +2,7 @@ import asyncio
 import json
 import unittest
 
-from voice_gateway.adapters.xiaoai_ws_server import XiaoAIWebSocketServer
+from server.adapters.xiaoai_ws_server import XiaoAIWebSocketServer
 
 
 class FakeWebSocket:

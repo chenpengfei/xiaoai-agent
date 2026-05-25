@@ -1,15 +1,15 @@
 import asyncio
 import unittest
 
-from voice_gateway.adapters import InMemoryDeviceController
-from voice_gateway.app import MinimalLoopGateway
-from voice_gateway.asr import StaticFinalASREngine
-from voice_gateway.audio import EndpointEvent
-from voice_gateway.hermes import StaticHermesConnector
-from voice_gateway.models import AudioWindow
-from voice_gateway.observability import InMemoryEventLogger
-from voice_gateway.playback import PlaybackManager, StaticTTSEngine
-from voice_gateway.xiaoai_runtime import RuntimeState, XiaoAIMinimalRuntime, _play_connected_prompt
+from server.adapters import InMemoryDeviceController
+from server.app import MinimalLoopGateway
+from server.asr import StaticFinalASREngine
+from server.audio import EndpointEvent
+from server.hermes import StaticHermesConnector
+from server.models import AudioWindow
+from server.observability import InMemoryEventLogger
+from server.playback import PlaybackManager, StaticTTSEngine
+from server.xiaoai_runtime import RuntimeState, XiaoAIMinimalRuntime, _play_connected_prompt
 
 
 class RaisingEndpoint:
