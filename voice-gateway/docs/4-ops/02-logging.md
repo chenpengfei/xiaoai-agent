@@ -60,6 +60,33 @@ voice-gateway/logs/audit.jsonl
 
 ## 3. JSONL 事件格式
 
+开发期控制台日志面向人工阅读，不使用 JSON。默认 `pretty` 格式固定为：
+
+```text
+HH:mm:ss.SSS LEVEL module   event            key=value key=value msg="..."
+```
+
+示例：
+
+```text
+18:20:15.203 INFO  turn     started          conv=c_123 turn=t_001 source=mic
+18:20:16.403 INFO  asr      completed        turn=t_001 cost=622ms text="今天天气怎么样"
+18:20:18.991 WARN  llm      slow_response    turn=t_001 cost=5200ms model=qwen3:30b
+18:20:24.221 ERROR tts      failed           turn=t_001 code=TTS_TIMEOUT cost=30000ms retryable=true msg="request timed out"
+```
+
+其中 `module` 借鉴 Android logcat 的 tag 思路，用短模块名方便过滤；事件上下文统一使用 `key=value`，字符串包含空格或中文时加双引号。
+
+本地 pretty console 默认只保留对人类排查有帮助的字段：
+
+- `turn_id` 显示为短 `turn`，用于把一轮对话串起来。
+- `conversation_id` 显示为短 `conv`，仅在需要关联多轮上下文时出现。
+- `device_id` / `service` / `trace_id` / `span_id` 不显示，因为它们主要服务多设备、多应用和分布式追踪。
+
+JSONL event 仍保留完整 `turn_id`、`conversation_id`、`device_id`、`trace_id`、`span_id`，供 Loki / Tempo / Grafana 聚合查询。需要深入性能分析时，先用 pretty console 里的短 `turn` 定位一轮，再到 `events.jsonl` 或观测系统中查完整 trace。
+
+代码里的普通运行日志使用 `runtime_log(module, event, **fields)` 输出同一格式；它只服务本地开发观察，不写入 `events.jsonl`，也不参与 metrics。观测系统使用的 JSONL event 仍通过 `events.emit(...)` 生成，两者职责分开。
+
 每条结构化事件必须包含：
 
 ```json
@@ -99,6 +126,8 @@ voice-gateway/logs/audit.jsonl
 
 ```bash
 VOICE_GATEWAY_LOG_LEVEL=INFO
+VOICE_GATEWAY_CONSOLE_FORMAT=pretty
+VOICE_GATEWAY_CONSOLE_LEVEL=INFO
 VOICE_GATEWAY_EVENT_LEVEL=INFO
 VOICE_GATEWAY_AUDIO_PROBE_LEVEL=WARN
 VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS=1
@@ -106,6 +135,8 @@ VOICE_GATEWAY_PROBE_INTERVAL_BYTES=160000
 ```
 
 - `VOICE_GATEWAY_LOG_LEVEL`：普通运行日志最低输出级别。默认 `INFO`，保留关键运行状态并过滤 `DEBUG`。
+- `VOICE_GATEWAY_CONSOLE_FORMAT`：控制台事件格式。默认 `pretty`，适合人工观察；可设为 `json` 输出原始 JSONL 到终端，或设为 `none` 只写文件。
+- `VOICE_GATEWAY_CONSOLE_LEVEL`：控制台事件最低输出级别。默认 `INFO`；不影响 `events.jsonl`。
 - `VOICE_GATEWAY_EVENT_LEVEL`：结构化事件日志 `events.jsonl` 最低记录级别。默认 `INFO`，保留主链路事件给 Loki/Grafana 使用。
 - `VOICE_GATEWAY_AUDIO_PROBE_LEVEL`：音频探测日志的最低输出级别。探测日志按 `INFO` 级别处理，默认 `WARN` 会抑制 `record stream bytes_total=...`；排查音频/VAD 时可临时改为 `INFO` 或 `DEBUG`。
 - `VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS`：是否抑制 `audio.chunk.received` 结构化事件，`1` 表示抑制，适合长期运行。
@@ -124,6 +155,8 @@ warning
 error
   当前 turn 失败或 runtime worker 异常
 ```
+
+默认采用 pretty console + full JSONL file：终端只显示关键 timeline，`events.jsonl` 继续保留完整结构化事件用于 Grafana/Loki 和事后排查。
 
 `audio.chunk.received` 默认可抑制。当前环境变量 `VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS=1` 适合长期运行，排查音频中断时再临时打开或依赖 probe log。
 

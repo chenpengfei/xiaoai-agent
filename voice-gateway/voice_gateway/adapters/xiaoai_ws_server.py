@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import sys
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.exceptions import ConnectionClosed
+
+from voice_gateway.observability import runtime_log
 
 
 Callback = Callable[[Any], Any]
@@ -47,7 +48,7 @@ class XiaoAIWebSocketServer:
     async def start_server(self) -> None:
         self._stop_event = asyncio.Event()
         async with serve(self._handle_connection, self.host, self.port, ping_interval=15):
-            print(f"voice-gateway XiaoAI websocket server listening on {self.host}:{self.port}", file=sys.stderr)
+            runtime_log("gateway", "started", host=self.host, port=self.port, protocol="xiaoai_ws")
             await self._stop_event.wait()
 
     async def stop(self) -> None:
@@ -73,7 +74,7 @@ class XiaoAIWebSocketServer:
             self._active_task.cancel()
         self._active_ws = websocket
         self._active_task = asyncio.current_task()
-        print("XiaoAI speaker connected", file=sys.stderr)
+        runtime_log("gateway", "connected", peer="xiaoai_speaker")
         bootstrap_task = asyncio.create_task(self._bootstrap_speaker())
         try:
             async for message in websocket:
@@ -92,7 +93,7 @@ class XiaoAIWebSocketServer:
             self._pending.clear()
             if not bootstrap_task.done():
                 bootstrap_task.cancel()
-            print("XiaoAI speaker disconnected", file=sys.stderr)
+            runtime_log("gateway", "disconnected", peer="xiaoai_speaker")
 
     async def _bootstrap_speaker(self) -> None:
         # Start the speaker-side record/play audio services. Failures here are
@@ -105,7 +106,7 @@ class XiaoAIWebSocketServer:
                 timeout_ms=5_000,
             )
         except Exception as exc:
-            print(f"start_recording failed: {exc}", file=sys.stderr)
+            runtime_log("audio", "record_start_failed", level="warn", error=str(exc))
         try:
             await self._call_remote(
                 "start_play",
@@ -113,14 +114,14 @@ class XiaoAIWebSocketServer:
                 timeout_ms=5_000,
             )
         except Exception as exc:
-            print(f"start_play failed: {exc}", file=sys.stderr)
+            runtime_log("playback", "start_failed", level="warn", error=str(exc))
         await self._invoke_callback("on_connected")
 
     async def _on_binary_message(self, message: bytes) -> None:
         try:
             stream = json.loads(message.decode("utf-8"))
         except Exception as exc:
-            print(f"invalid XiaoAI stream message: {exc}", file=sys.stderr)
+            runtime_log("gateway", "invalid_stream", level="warn", error=str(exc))
             return
         if stream.get("tag") != "record":
             return
@@ -128,7 +129,7 @@ class XiaoAIWebSocketServer:
         try:
             data = bytes(raw_bytes)
         except Exception:
-            print("invalid XiaoAI record bytes", file=sys.stderr)
+            runtime_log("audio", "invalid_record_bytes", level="warn")
             return
         callback = self._callbacks.get("on_input_data")
         if callback is not None:
@@ -138,7 +139,7 @@ class XiaoAIWebSocketServer:
         try:
             payload = json.loads(message)
         except Exception as exc:
-            print(f"invalid XiaoAI text message: {exc}", file=sys.stderr)
+            runtime_log("gateway", "invalid_text", level="warn", error=str(exc))
             return
         if "Response" in payload:
             self._on_response(payload["Response"])

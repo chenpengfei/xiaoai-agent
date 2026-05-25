@@ -21,7 +21,7 @@ from voice_gateway.config import EndpointingConfig, load_config_from_env
 from voice_gateway.dialogue.triggers import contains_wake_word, normalize_trigger_text
 from voice_gateway.hermes import EchoHermesConnector, OpenAICompatibleHermesConnector
 from voice_gateway.models import AudioChunk, DialogueState
-from voice_gateway.observability import JsonLineEventLogger, runtime_log_enabled, start_metrics_server
+from voice_gateway.observability import JsonLineEventLogger, runtime_log, runtime_log_enabled, start_metrics_server
 from voice_gateway.playback import PlaybackManager, StaticTTSEngine, build_tts_engine, warm_tts_engine
 
 DEFAULT_WAKE_ACK_TEXTS = ("我在", "在", "诶")
@@ -393,11 +393,16 @@ class XiaoAIMinimalRuntime:
                     rms = round(math.sqrt(sum(value * value for value in values) / len(values)))
             except Exception:
                 pass
-            print(
-                "record stream "
-                f"bytes_total={self.total_bytes} chunk={len(data)} elapsed={elapsed:.1f}s "
-                f"rms={rms} peak={peak} first16={data[:16].hex(' ')}",
-                file=sys.stderr,
+            runtime_log(
+                "audio",
+                "stream_probe",
+                min_level=probe_min_level,
+                bytes_total=self.total_bytes,
+                chunk=len(data),
+                elapsed=f"{elapsed:.1f}s",
+                rms=rms,
+                peak=peak,
+                first16=data[:16].hex(" "),
             )
 
 
@@ -464,10 +469,13 @@ async def run_server(args: argparse.Namespace) -> int:
         except NotImplementedError:
             pass
 
-    print(
-        "voice-gateway XiaoAI minimal runtime listening "
-        f"host={args.host} port={args.port} device_id={args.device_id} wake_word={args.wake_word!r}",
-        file=sys.stderr,
+    runtime_log(
+        "gateway",
+        "started",
+        host=args.host,
+        port=args.port,
+        device_id=args.device_id,
+        wake_word=args.wake_word,
     )
     server_task = asyncio.create_task(xiaoai_server.start_server())
     stop_task = asyncio.create_task(stop_event.wait())

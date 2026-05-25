@@ -15,7 +15,7 @@ from voice_gateway.dialogue.state_machine import DialogueStateMachine
 from voice_gateway.hermes.base import EchoHermesConnector, HermesConnector
 from voice_gateway.hermes.openai_compatible import OpenAICompatibleHermesConnector
 from voice_gateway.models import ASRResult, AudioChunk, DialogueMessage, DialogueState, HermesResponse, HermesTurn, Turn
-from voice_gateway.observability.events import EventLogger, JsonLineEventLogger
+from voice_gateway.observability.events import EventLogger, JsonLineEventLogger, runtime_log
 from voice_gateway.observability.tracing import SpanHandle, TraceManager
 from voice_gateway.playback.base import PlaybackManager, StaticTTSEngine, build_tts_engine, warm_tts_engine
 
@@ -702,7 +702,14 @@ async def run_offline_demo(args: argparse.Namespace) -> int:
                 break
     if result is None:
         raise RuntimeError("audio did not produce a speech endpoint")
-    print(f"turn={result.state} text={result.asr.text if result.asr else ''} error={result.error or ''}")
+    runtime_log(
+        "turn",
+        "completed" if result.state != "failed" else "failed",
+        level="error" if result.state == "failed" else "info",
+        state=result.state,
+        text=result.asr.text if result.asr else "",
+        error=result.error or "",
+    )
     return 0 if result.state != "failed" else 1
 
 
