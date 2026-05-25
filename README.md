@@ -1,17 +1,16 @@
 # xiaoai-agent
 
-This repository contains two independent runtime projects plus shared artifacts.
+This repository contains the `voice-gateway` runtime plus shared artifacts.
 
 ## Runtime Projects
 
 - `voice-gateway/`: Mac Mini side voice gateway. It owns the long-running gateway process, observability stack, local ASR/VAD integration, Hermes calls, TTS generation, and speaker playback control.
-- `open-xiaoai/`: XiaoAI firmware/client reference and device-side tooling. It remains an independent project and is not imported by `voice-gateway`.
 
-The two projects may speak the same XiaoAI WebSocket/RPC protocol at runtime, but neither project should depend on the other's Python package, Rust crate, virtual environment, scripts, or source tree.
+Firmware patching and upstream XiaoAI reference material live outside this repository. When needed, refer to the archived upstream project: <https://github.com/idootop/open-xiaoai>.
 
 ## Shared Artifacts
 
-`models/` is a repository-level shared artifact directory. It is intentionally outside both `voice-gateway/` and `open-xiaoai/`.
+`models/` is a repository-level shared artifact directory. It is intentionally outside `voice-gateway/`.
 
 Current shared models:
 
@@ -27,4 +26,4 @@ VOICE_GATEWAY_SHERPA_MODEL_DIR=/path/to/xiaoai-agent/models/sherpa-onnx-paraform
 SHERPA_ONNX_MODEL_DIR=/path/to/xiaoai-agent/models/sherpa-onnx-paraformer-zh-2024-03-09
 ```
 
-Shared artifacts are data dependencies, not project dependencies. Adding a model under `models/` must not introduce imports, package references, or startup requirements between `voice-gateway/` and `open-xiaoai/`.
+Shared artifacts are data dependencies, not project dependencies. Adding a model under `models/` must not introduce imports, package references, or startup requirements on external upstream source checkouts.

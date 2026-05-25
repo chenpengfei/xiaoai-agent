@@ -152,7 +152,7 @@ Event(event=..., data=...)
 - 固件 patch 工具链。
 - 固件下载、提取、重打包和分区切换。
 - 单独维护交叉编译 runtime 镜像。
-- `open-xiaoai/examples/xiaozhi` 的 Python/Rust server。
+- `https://github.com/idootop/open-xiaoai/tree/main/examples/xiaozhi` 的 Python/Rust server。
 - xiaozhi 云端协议和小智 AI 对话逻辑。
 - MiGPT、Gemini、stereo 等示例工程。
 

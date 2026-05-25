@@ -79,11 +79,11 @@ netstat -anv -p tcp | grep '.4399 '
 当前代码入口：
 
 ```text
-open-xiaoai/examples/xiaozhi/src/server.rs:on_stream()
+https://github.com/idootop/open-xiaoai/tree/main/examples/xiaozhi/src/server.rs:on_stream()
   tag == "record"
   -> PythonManager::call_fn("on_input_data", bytes)
 
-open-xiaoai/examples/xiaozhi/xiaozhi/xiaoai.py:on_input_data()
+https://github.com/idootop/open-xiaoai/tree/main/examples/xiaozhi/xiaozhi/xiaoai.py:on_input_data()
   -> GlobalStream.input(...)
 ```
 
@@ -91,10 +91,8 @@ open-xiaoai/examples/xiaozhi/xiaozhi/xiaoai.py:on_input_data()
 
 打开 server 运行终端，重启一次 server：
 
-```sh
-cd /Users/chenpengfei/projects/vibe-coding/xiaoai-agent/open-xiaoai
-./scripts/run-xiaozhi-hermes-dev.sh
-```
+如需复现旧 xiaozhi 开发 server，请在本仓库外单独 clone 上游归档仓库后运行：
+<https://github.com/idootop/open-xiaoai/tree/main/scripts/run-xiaozhi-hermes-dev.sh>
 
 启动后期望音箱播报：
 
@@ -136,7 +134,7 @@ start_play
 文件：
 
 ```text
-open-xiaoai/examples/xiaozhi/xiaozhi/xiaoai.py
+https://github.com/idootop/open-xiaoai/tree/main/examples/xiaozhi/xiaozhi/xiaoai.py
 ```
 
 函数：
@@ -157,8 +155,8 @@ def on_input_data(cls, data: bytes):
 ## 2.2 重启 server
 
 ```sh
-cd /Users/chenpengfei/projects/vibe-coding/xiaoai-agent/open-xiaoai
-./scripts/run-xiaozhi-hermes-dev.sh
+请在本仓库外单独 clone 上游归档仓库后运行 run-xiaozhi-hermes-dev.sh：
+https://github.com/idootop/open-xiaoai/tree/main/scripts/run-xiaozhi-hermes-dev.sh
 ```
 
 ## 2.3 观察是否持续收到音频

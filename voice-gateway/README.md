@@ -2,7 +2,7 @@
 
 `voice-gateway` 是小爱音箱项目的长期 Mac Mini 侧语音网关工程。
 
-它的目标是替代当前偏演示性质的 `open-xiaoai/examples/xiaozhi` 状态机，让小爱音箱退化为麦克风、扬声器和设备控制端，而由 Mac Mini 负责 VAD、ASR、声纹识别、连续对话、自然打断、Hermes 接入和 TTS/播放策略。
+它的目标是替代当前偏演示性质的 `https://github.com/idootop/open-xiaoai/tree/main/examples/xiaozhi` 状态机，让小爱音箱退化为麦克风、扬声器和设备控制端，而由 Mac Mini 负责 VAD、ASR、声纹识别、连续对话、自然打断、Hermes 接入和 TTS/播放策略。
 
 `voice-gateway` 运行时不依赖 `open-xiaoai` 的 Python 包、Rust 扩展、虚拟环境或脚本。仓库根目录的 `models/` 是两个工程之外的共享 artifact 目录，当前用于保存 sherpa-onnx ASR 模型；`voice-gateway` 通过 `VOICE_GATEWAY_SHERPA_MODEL_DIR` 引用它。
 
