@@ -42,6 +42,11 @@ class SequenceFinalASREngine:
         return None
 
 
+class FailingHermesConnector:
+    async def ask(self, _turn):
+        raise RuntimeError("hermes unavailable")
+
+
 class MinimalLoopGatewayTest(unittest.IsolatedAsyncioTestCase):
     async def test_single_turn_returns_to_idle_after_playback(self):
         endpoint_config = EndpointingConfig(
@@ -142,6 +147,52 @@ class MinimalLoopGatewayTest(unittest.IsolatedAsyncioTestCase):
         assert turn_failed.fields["failure_reason"] == "empty_asr"
         assert turn_failed.fields["last_successful_stage"] == "asr"
         assert turn_failed.fields["stage_ms"]["asr"] >= 0
+
+    async def test_hermes_failure_emits_hermes_failed_and_turn_failed(self):
+        endpoint_config = EndpointingConfig(
+            frame_ms=30,
+            speech_rms_threshold=450,
+            min_speech_ms=90,
+            min_silence_ms=90,
+        )
+        events = InMemoryEventLogger()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=StaticFinalASREngine("一加二等于几"),
+            hermes=FailingHermesConnector(),
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=InMemoryDeviceController(),
+                events=events,
+            ),
+            endpoint=EnergyEndpointDetector(endpoint_config),
+            events=events,
+        )
+
+        await gateway.wakeup()
+        result = await gateway.accept_audio(
+            AudioChunk(
+                device_id="speaker-1",
+                seq=1,
+                timestamp_ms=0,
+                pcm=utterance_pcm(endpoint_config),
+            )
+        )
+
+        assert result is not None
+        assert result.state == "failed"
+        assert result.error == "hermes unavailable"
+        assert gateway.state == DialogueState.IDLE
+
+        hermes_failed = next(event for event in events.events if event.event == "hermes.failed")
+        turn_failed = next(event for event in events.events if event.event == "turn.failed")
+        assert hermes_failed.fields["error_type"] == "RuntimeError"
+        assert hermes_failed.fields["error"] == "hermes unavailable"
+        assert hermes_failed.fields["user_text"] == "一加二等于几"
+        assert hermes_failed.fields["latency_ms"] >= 0
+        assert turn_failed.fields["failed_stage"] == "hermes"
+        assert turn_failed.fields["failure_reason"] == "RuntimeError"
+        assert turn_failed.fields["last_successful_stage"] == "asr"
 
     async def test_empty_trigger_question_prompts_locally_without_hermes(self):
         endpoint_config = EndpointingConfig(

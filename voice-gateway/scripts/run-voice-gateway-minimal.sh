@@ -8,6 +8,26 @@ LOG_DIR="$VOICE_GATEWAY_DIR/logs"
 LOG_FILE="$LOG_DIR/voice-gateway-minimal.log"
 EVENTS_LOG_FILE="$LOG_DIR/events.jsonl"
 
+detect_lan_ip() {
+  local iface=""
+  if command -v route >/dev/null 2>&1; then
+    iface="$(route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}' || true)"
+  elif command -v ip >/dev/null 2>&1; then
+    iface="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i=="dev") {print $(i+1); exit}}' || true)"
+  fi
+
+  if [[ -n "$iface" ]] && command -v ifconfig >/dev/null 2>&1; then
+    ifconfig "$iface" 2>/dev/null | awk '/inet / && $2 !~ /^127\./ && $2 !~ /^169\.254\./ {print $2; exit}'
+    return
+  fi
+
+  if command -v ifconfig >/dev/null 2>&1; then
+    ifconfig | awk '/inet / && $2 !~ /^127\./ && $2 !~ /^169\.254\./ {print $2; exit}'
+  elif command -v ip >/dev/null 2>&1; then
+    ip -4 addr show scope global | awk '/inet / {split($2, a, "/"); print a[1]; exit}'
+  fi
+}
+
 # 补充本机常用可执行文件路径，确保 uv、edge-tts 等命令能被脚本直接找到。
 export PATH="/Users/chenpengfei/.local/bin:/opt/homebrew/bin:$PATH"
 # 将 voice-gateway 源码目录加入 Python 模块路径，确保始终使用本项目代码启动。
@@ -31,11 +51,15 @@ export VOICE_GATEWAY_PORT="${VOICE_GATEWAY_PORT:-4399}"
 # 唤醒后等待用户正式提问的最长时间，单位为秒。
 export VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS="${VOICE_GATEWAY_QUESTION_TIMEOUT_SECONDS:-5}"
 # 回答播放结束后的免唤醒追问窗口，单位为秒；设为 0 可关闭连续对话。
-export VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS="${VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS:-15}"
+export VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS="${VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS:-10}"
 # 播放唤醒提示短语后额外忽略采集音频的时长。miplayer 已被 await，默认不再丢弃句首。
 export VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS="${VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS:-0}"
 # ACK 前缀剥离后少于该字符数则认为不是有效问题，继续等待用户提问。
 export VOICE_GATEWAY_MIN_QUESTION_TEXT_CHARS="${VOICE_GATEWAY_MIN_QUESTION_TEXT_CHARS:-2}"
+# VAD 若把一句话切成多段，先等待短窗口合并后再送 Hermes。
+export VOICE_GATEWAY_MERGE_WINDOW_SECONDS="${VOICE_GATEWAY_MERGE_WINDOW_SECONDS:-0.8}"
+# 回答播放后短暂忽略麦克风，避免把音箱自己的回答尾音当作追问。
+export VOICE_GATEWAY_POST_PLAYBACK_IGNORE_SECONDS="${VOICE_GATEWAY_POST_PLAYBACK_IGNORE_SECONDS:-0.6}"
 # sherpa-onnx 中文 ASR 模型目录，需包含 model.int8.onnx 和 tokens.txt。
 export VOICE_GATEWAY_SHERPA_MODEL_DIR="${VOICE_GATEWAY_SHERPA_MODEL_DIR:-$PROJECT_ROOT/models/sherpa-onnx-paraformer-zh-2024-03-09}"
 # Silero VAD 模型文件路径，用于从音箱音频流中切分用户语音。
@@ -43,7 +67,12 @@ export VOICE_GATEWAY_SILERO_VAD_MODEL="${VOICE_GATEWAY_SILERO_VAD_MODEL:-$VOICE_
 # TTS 生成音频的本地输出目录，供 HTTP 服务暴露给音箱播放。
 export VOICE_GATEWAY_TTS_OUTPUT_DIR="${VOICE_GATEWAY_TTS_OUTPUT_DIR:-$VOICE_GATEWAY_DIR/audio-samples/tts}"
 # TTS 音频 HTTP 基础地址，音箱会通过该地址拉取生成后的音频文件。
-export VOICE_GATEWAY_TTS_HTTP_BASE_URL="${VOICE_GATEWAY_TTS_HTTP_BASE_URL:-http://192.168.1.9:8765}"
+VOICE_GATEWAY_LAN_IP="${VOICE_GATEWAY_LAN_IP:-$(detect_lan_ip)}"
+if [[ -z "$VOICE_GATEWAY_LAN_IP" ]]; then
+  echo "WARN: could not detect LAN IP; falling back to 127.0.0.1 for TTS HTTP URL" >&2
+  VOICE_GATEWAY_LAN_IP="127.0.0.1"
+fi
+export VOICE_GATEWAY_TTS_HTTP_BASE_URL="${VOICE_GATEWAY_TTS_HTTP_BASE_URL:-http://$VOICE_GATEWAY_LAN_IP:8765}"
 # Edge TTS 音色和语速。TTS 运行时固定使用 Edge TTS 并输出 mp3。
 export VOICE_GATEWAY_TTS_VOICE="${VOICE_GATEWAY_TTS_VOICE:-zh-CN-XiaoxiaoNeural}"
 export VOICE_GATEWAY_TTS_RATE="${VOICE_GATEWAY_TTS_RATE:-+0%}"
@@ -57,6 +86,10 @@ export VOICE_GATEWAY_SILERO_MIN_SPEECH="${VOICE_GATEWAY_SILERO_MIN_SPEECH:-0.12}
 export VOICE_GATEWAY_VAD_GAIN_DB="${VOICE_GATEWAY_VAD_GAIN_DB:-30}"
 # 普通运行日志最低输出级别。默认保留关键状态和错误，过滤 DEBUG 噪声。
 export VOICE_GATEWAY_LOG_LEVEL="${VOICE_GATEWAY_LOG_LEVEL:-INFO}"
+# 控制台事件输出格式。pretty 给人看，json 用于排查原始事件，none 表示只写文件。
+export VOICE_GATEWAY_CONSOLE_FORMAT="${VOICE_GATEWAY_CONSOLE_FORMAT:-pretty}"
+# 控制台事件最低输出级别；不影响 events.jsonl。
+export VOICE_GATEWAY_CONSOLE_LEVEL="${VOICE_GATEWAY_CONSOLE_LEVEL:-INFO}"
 # 结构化事件日志最低记录级别。events.jsonl 是 Grafana/Loki 的主数据源，默认保留 INFO/WARN/ERROR。
 export VOICE_GATEWAY_EVENT_LEVEL="${VOICE_GATEWAY_EVENT_LEVEL:-INFO}"
 # 音频探测日志最低输出级别。默认 WARN 会抑制 record stream 探测，排查音频时临时改为 INFO 或 DEBUG。
@@ -162,6 +195,8 @@ echo "voice_gateway: $VOICE_GATEWAY_DIR"
 echo "log: $LOG_FILE"
 echo "events_log: $VOICE_GATEWAY_EVENTS_LOG_FILE"
 echo "log_level: $VOICE_GATEWAY_LOG_LEVEL"
+echo "console_format: $VOICE_GATEWAY_CONSOLE_FORMAT"
+echo "console_level: $VOICE_GATEWAY_CONSOLE_LEVEL"
 echo "event_level: $VOICE_GATEWAY_EVENT_LEVEL"
 echo "audio_probe_level: $VOICE_GATEWAY_AUDIO_PROBE_LEVEL"
 echo "suppress_audio_chunks: $VOICE_GATEWAY_SUPPRESS_AUDIO_CHUNKS"
@@ -171,6 +206,8 @@ echo "metrics: http://$VOICE_GATEWAY_METRICS_HOST:$VOICE_GATEWAY_METRICS_PORT/me
 echo "otel_traces: $VOICE_GATEWAY_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"
 echo "wake_word: $VOICE_GATEWAY_WAKE_WORD"
 echo "followup_timeout_seconds: $VOICE_GATEWAY_FOLLOWUP_TIMEOUT_SECONDS"
+echo "merge_window_seconds: $VOICE_GATEWAY_MERGE_WINDOW_SECONDS"
+echo "post_playback_ignore_seconds: $VOICE_GATEWAY_POST_PLAYBACK_IGNORE_SECONDS"
 echo "route: wake word -> random speaker text ack -> question -> Hermes -> follow-up window"
 echo "openai_base_url: $VOICE_GATEWAY_OPENAI_BASE_URL"
 echo "openai_model: $VOICE_GATEWAY_OPENAI_MODEL"

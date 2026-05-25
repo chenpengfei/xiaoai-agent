@@ -86,6 +86,15 @@ hermes gateway
 ./scripts/run-voice-gateway-minimal.sh
 ```
 
+如果 Mac Mini 升级系统或切换网络后 IP 变化，先同步音箱端连接地址：
+
+```sh
+cd /Users/chenpengfei/projects/vibe-coding/xiaoai-agent/voice-gateway
+VOICE_GATEWAY_SPEAKER_PASSWORD=open-xiaoai ./scripts/sync-speaker-network.sh
+```
+
+该脚本会自动识别音箱 IP、Mac Mini LAN IP，并把音箱端 `server.txt` 更新为当前 Mac Mini 的 `ws://<ip>:4399`。
+
 先说：
 
 ```text

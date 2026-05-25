@@ -56,6 +56,8 @@ VOICE_GATEWAY_MIN_QUESTION_TEXT_CHARS=2
 - 用户说话后检测到 `0.5s` 静音即判定一句话结束，对齐常见 segmentation silence timeout。
 - `VOICE_GATEWAY_ACK_SUPPRESSION_SECONDS=0`。`miplayer` 播放已被 await，默认不额外丢弃反馈后的音频，避免快语速用户的句首被切掉；如实测存在明显回采，再临时调高。
 - 当前问题等待期间启用 ACK 文本过滤：如果 ASR 文本以“我在”“在”“诶”等反馈短句开头，则剥离该前缀；剥离后少于 `2` 个字符则忽略本次短文本并继续等待用户问题。
+- `VOICE_GATEWAY_POST_PLAYBACK_IGNORE_SECONDS=0.6`。该参数只用于回答播放结束后，先清理播放期间积压的音频并短暂忽略 TTS 尾音，避免把音箱自己的回答当成免唤醒追问；不影响 ACK 后的快速提问。
+- `VOICE_GATEWAY_MERGE_WINDOW_SECONDS=0.8`。ASR 捕获到一个问题段后等待短窗口，合并同一句话里被 VAD 切开的后续短段，再一次性送 Hermes。
 
 ## 可观测性
 

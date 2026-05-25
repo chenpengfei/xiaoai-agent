@@ -38,6 +38,32 @@ class OneShotEndpoint:
         ]
 
 
+class ScriptedEndpoint:
+    def __init__(self, scripts):
+        self.scripts = list(scripts)
+        self.index = 0
+
+    def reset(self):
+        pass
+
+    def accept_chunk(self, chunk):
+        script = self.scripts[min(self.index, len(self.scripts) - 1)]
+        self.index += 1
+        if script == "silence":
+            return []
+        window = AudioWindow(
+            device_id=chunk.device_id,
+            start_ms=chunk.timestamp_ms,
+            end_ms=chunk.timestamp_ms + 300,
+            sample_rate=chunk.sample_rate,
+            pcm=chunk.pcm,
+        )
+        return [
+            EndpointEvent(kind="speech_started", timestamp_ms=chunk.timestamp_ms),
+            EndpointEvent(kind="speech_ended", window=window, timestamp_ms=window.end_ms),
+        ]
+
+
 class RejectingDeviceController:
     def __init__(self):
         self.played = []
@@ -76,6 +102,18 @@ class QueueDuringAckDeviceController:
         return True
 
 
+class QueueDuringAnswerDeviceController:
+    def __init__(self):
+        self.played = []
+        self.runtime = None
+
+    async def play_audio_resource(self, resource):
+        self.played.append(resource)
+        if len(self.played) == 2 and self.runtime is not None:
+            self.runtime._put_nowait(b"\x04\x00" * 480)
+        return True
+
+
 class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
     async def test_worker_recovers_after_gateway_exception(self):
         events = InMemoryEventLogger()
@@ -96,6 +134,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             device_id="speaker-1",
             wake_asr=StaticFinalASREngine("你好"),
             wake_endpoint=RaisingEndpoint(),
+            merge_window_seconds=0,
         )
 
         await runtime.start()
@@ -134,6 +173,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             wake_word="你好",
             wake_ack_texts=("在",),
             ack_suppression_seconds=0,
+            merge_window_seconds=0,
         )
 
         await runtime.start()
@@ -177,6 +217,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             device=playback_device,
             wake_word="你好",
             wake_ack_texts=("在",),
+            merge_window_seconds=0,
         )
 
         await runtime.start()
@@ -212,6 +253,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             device=playback_device,
             wake_word="你好",
             wake_ack_texts=("在",),
+            merge_window_seconds=0,
         )
         playback_device.runtime = runtime
 
@@ -250,6 +292,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             device=playback_device,
             wake_word="你好",
             wake_ack_texts=("在",),
+            merge_window_seconds=0,
         )
 
         await runtime.start()
@@ -262,6 +305,48 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
         assert len(hermes.turns) == 1
         assert hermes.turns[0].user_text == "家里有几个人"
         assert len(playback_device.played) == 2
+
+        await runtime.stop()
+
+    async def test_split_question_segments_are_merged_before_hermes(self):
+        events = InMemoryEventLogger()
+        hermes = StaticHermesConnector("是挺累的。")
+        playback_device = InMemoryDeviceController()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=SequenceFinalASREngine(["有用的人", "没有一个不累的"]),
+            hermes=hermes,
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=playback_device,
+                events=events,
+            ),
+            endpoint=OneShotEndpoint(),
+            events=events,
+        )
+        runtime = XiaoAIMinimalRuntime(
+            gateway,
+            device_id="speaker-1",
+            wake_asr=StaticFinalASREngine("你好"),
+            wake_endpoint=OneShotEndpoint(),
+            device=playback_device,
+            wake_word="你好",
+            wake_ack_texts=("在",),
+            merge_window_seconds=0.05,
+        )
+
+        await runtime.start()
+        runtime._put_nowait(b"\x01\x00" * 480)
+        await asyncio.sleep(0.05)
+        runtime._put_nowait(b"\x02\x00" * 480)
+        await asyncio.sleep(0.01)
+        runtime._put_nowait(b"\x03\x00" * 480)
+        await asyncio.sleep(0.1)
+
+        assert runtime.state == RuntimeState.WAIT_WAKE_WORD
+        assert len(hermes.turns) == 1
+        assert hermes.turns[0].user_text == "有用的人没有一个不累的"
+        assert "runtime.question_merged" in events.names()
 
         await runtime.stop()
 
@@ -289,6 +374,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             device=playback_device,
             wake_word="你好",
             wake_ack_texts=("在",),
+            merge_window_seconds=0,
         )
 
         await runtime.start()
@@ -330,6 +416,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             device=playback_device,
             wake_word="你好",
             wake_ack_texts=("在",),
+            merge_window_seconds=0,
         )
 
         await runtime.start()
@@ -381,6 +468,8 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             wake_word="你好",
             wake_ack_texts=("在",),
             followup_timeout_seconds=15,
+            merge_window_seconds=0,
+            post_playback_ignore_seconds=0,
         )
 
         await runtime.start()
@@ -409,6 +498,126 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         await runtime.stop()
 
+    async def test_followup_silence_does_not_create_turn(self):
+        events = InMemoryEventLogger()
+        hermes = StaticHermesConnector("我是小马。")
+        playback_device = InMemoryDeviceController()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=SequenceFinalASREngine(["你是谁", "我刚才问了什么"]),
+            hermes=hermes,
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=playback_device,
+                events=events,
+            ),
+            endpoint=ScriptedEndpoint(["speech", "silence", "speech"]),
+            events=events,
+            followup_enabled=True,
+        )
+        runtime = XiaoAIMinimalRuntime(
+            gateway,
+            device_id="speaker-1",
+            wake_asr=StaticFinalASREngine("你好"),
+            wake_endpoint=OneShotEndpoint(),
+            device=playback_device,
+            wake_word="你好",
+            wake_ack_texts=("在",),
+            followup_timeout_seconds=15,
+            merge_window_seconds=0,
+            post_playback_ignore_seconds=0,
+        )
+
+        await runtime.start()
+        runtime._put_nowait(b"\x01\x00" * 480)
+        await asyncio.sleep(0.05)
+        runtime._put_nowait(b"\x02\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert gateway.state.value == "FOLLOWUP_WAIT"
+        assert len(hermes.turns) == 1
+        followup_started_count = events.names().count("followup.started")
+
+        runtime._put_nowait(b"\x03\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert gateway.state.value == "FOLLOWUP_WAIT"
+        assert len(hermes.turns) == 1
+        assert events.names().count("followup.started") == followup_started_count
+        assert "followup.audio_chunk_received" not in events.names()
+
+        runtime._put_nowait(b"\x04\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert len(hermes.turns) == 2
+        assert hermes.turns[1].user_text == "我刚才问了什么"
+
+        await runtime.stop()
+
+    async def test_answer_playback_echo_is_drained_and_guarded_before_followup(self):
+        events = InMemoryEventLogger()
+        hermes = StaticHermesConnector("一加二等于三。")
+        playback_device = QueueDuringAnswerDeviceController()
+        gateway = MinimalLoopGateway(
+            device_id="speaker-1",
+            asr=SequenceFinalASREngine(["一加二等于几", "有用的人没有不累的"]),
+            hermes=hermes,
+            playback=PlaybackManager(
+                tts=StaticTTSEngine(),
+                device=playback_device,
+                events=events,
+            ),
+            endpoint=OneShotEndpoint(),
+            events=events,
+            followup_enabled=True,
+        )
+        runtime = XiaoAIMinimalRuntime(
+            gateway,
+            device_id="speaker-1",
+            wake_asr=StaticFinalASREngine("你好"),
+            wake_endpoint=OneShotEndpoint(),
+            device=playback_device,
+            wake_word="你好",
+            wake_ack_texts=("在",),
+            followup_timeout_seconds=15,
+            merge_window_seconds=0,
+            post_playback_ignore_seconds=0.1,
+        )
+        playback_device.runtime = runtime
+
+        await runtime.start()
+        runtime._put_nowait(b"\x01\x00" * 480)
+        await asyncio.sleep(0.05)
+        runtime._put_nowait(b"\x02\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert len(hermes.turns) == 1
+        assert hermes.turns[0].user_text == "一加二等于几"
+        assert "runtime.playback_backlog_drained" in events.names()
+
+        runtime._put_nowait(b"\x05\x00" * 480)
+        runtime._put_nowait(b"\x06\x00" * 480)
+        runtime._put_nowait(b"\x07\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert len(hermes.turns) == 1
+        assert events.names().count("input_gate.ignored") == 1
+
+        await asyncio.sleep(0.1)
+        runtime._put_nowait(b"\x03\x00" * 480)
+        await asyncio.sleep(0.05)
+
+        assert runtime.state == RuntimeState.FOLLOWUP_WAIT
+        assert len(hermes.turns) == 2
+        assert hermes.turns[1].user_text == "有用的人没有不累的"
+
+        await runtime.stop()
+
     async def test_failed_wake_ack_does_not_suppress_question_audio(self):
         events = InMemoryEventLogger()
         hermes = StaticHermesConnector("我是小马。")
@@ -434,6 +643,7 @@ class XiaoAIMinimalRuntimeTest(unittest.IsolatedAsyncioTestCase):
             wake_word="你好",
             wake_ack_texts=("在",),
             ack_suppression_seconds=10,
+            merge_window_seconds=0,
         )
 
         await runtime.start()

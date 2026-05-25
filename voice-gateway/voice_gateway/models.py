@@ -94,6 +94,7 @@ class Turn:
     conversation_id: str
     device_id: str
     state: str
+    user_text: str = ""
     audio_window: Optional[AudioWindow] = None
     asr: Optional[ASRResult] = None
     hermes_response: Optional[HermesResponse] = None
