@@ -1,3 +1,64 @@
-if [ -x .githooks/pre-push ]; then
-  .githooks/pre-push "$@"
+set -eu
+
+if [ "${SKIP_GIT_GUARDS:-}" = "1" ]; then
+  exit 0
+fi
+
+fail=0
+
+ignored_count=$(git ls-files -ci --exclude-standard | wc -l | tr -d ' ')
+if [ "$ignored_count" != "0" ]; then
+  printf 'pre-push: %s tracked file(s) are ignored by .gitignore.\n' "$ignored_count" >&2
+  git ls-files -ci --exclude-standard >&2
+  fail=1
+fi
+
+if ! git submodule status >/dev/null 2>&1; then
+  printf 'pre-push: submodule metadata is invalid. Check .gitmodules.\n' >&2
+  fail=1
+fi
+
+if [ "${SKIP_SUBMODULE_CHECK:-}" != "1" ]; then
+  dirty_submodules=$(
+    git submodule foreach --quiet '
+      git diff --quiet &&
+      git diff --cached --quiet &&
+      test -z "$(git ls-files --others --exclude-standard)" ||
+      echo "$name"
+    ' 2>/dev/null || true
+  )
+
+  if [ -n "$dirty_submodules" ]; then
+    printf 'pre-push: dirty submodule(s) detected:\n%s\n' "$dirty_submodules" >&2
+    printf 'Commit/reset the submodule changes, or use SKIP_SUBMODULE_CHECK=1 intentionally.\n' >&2
+    fail=1
+  fi
+fi
+
+if [ "${SKIP_TESTS:-}" != "1" ] && [ -d "voice-gateway/tests" ]; then
+  if command -v uv >/dev/null 2>&1 && [ -f "voice-gateway/uv.lock" ]; then
+    if ! (cd voice-gateway && uv run pytest); then
+      printf 'pre-push: tests failed. Use SKIP_TESTS=1 only for a deliberate emergency bypass.\n' >&2
+      fail=1
+    fi
+  elif command -v python3 >/dev/null 2>&1; then
+    py=python3
+  elif command -v python >/dev/null 2>&1; then
+    py=python
+  else
+    printf 'pre-push: Python is required to run tests.\n' >&2
+    fail=1
+    py=
+  fi
+
+  if [ -n "${py:-}" ]; then
+    if ! (cd voice-gateway && "$py" -m pytest); then
+      printf 'pre-push: tests failed. Use SKIP_TESTS=1 only for a deliberate emergency bypass.\n' >&2
+      fail=1
+    fi
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  exit 1
 fi

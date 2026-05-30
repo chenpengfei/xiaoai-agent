@@ -1,7 +1,7 @@
 # Git Hooks
 
 This repository runs shareable Git hooks through Husky in `.husky/`.
-The Husky hooks also call the legacy guard scripts in `.githooks/`.
+The Husky files are the single source of truth for hook behavior.
 
 Enable them once per clone:
 
