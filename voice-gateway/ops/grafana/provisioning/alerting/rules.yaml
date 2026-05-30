@@ -9,6 +9,7 @@ groups:
       - uid: voice-gateway-down
         title: Voice Gateway down
         condition: C
+        noDataState: OK
         for: 1m
         labels:
           severity: P1
@@ -62,6 +63,7 @@ groups:
       - uid: voice-gateway-audio-stale
         title: Voice Gateway audio stream stale
         condition: C
+        noDataState: OK
         for: 2m
         labels:
           severity: P1
@@ -78,7 +80,7 @@ groups:
               to: 0
             model:
               refId: A
-              expr: "voice_gateway_audio_chunk_total > 0 and voice_gateway_audio_last_seen_age_seconds > 120"
+              expr: "(voice_gateway_audio_chunk_total > bool 0) * (voice_gateway_audio_last_seen_age_seconds > bool 120)"
               instant: true
               range: false
           - refId: B
@@ -112,32 +114,33 @@ groups:
                     type: last
                   type: query
 
-      - uid: voice-gateway-turn-failures
-        title: Voice Gateway turn failures
+      - uid: voice-gateway-runtime-worker-failed
+        title: Voice Gateway runtime worker failed
         condition: C
-        for: 1m
+        noDataState: OK
+        for: 0s
         labels:
-          severity: P2
+          severity: P1
           service: voice-gateway
           device_id: xiaoai-speaker
         annotations:
-          summary: "Recent voice turns are failing."
+          summary: "A runtime worker failed."
           runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md"
         data:
           - refId: A
             datasourceUid: prometheus
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: A
-              expr: "increase(voice_gateway_turn_failure_total[10m])"
+              expr: "sum(increase(voice_gateway_runtime_worker_failure_total[5m])) or vector(0)"
               instant: true
               range: false
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: B
@@ -147,7 +150,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: C
@@ -155,7 +158,7 @@ groups:
               expression: B
               conditions:
                 - evaluator:
-                    params: [2]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -165,32 +168,87 @@ groups:
                     type: last
                   type: query
 
-      - uid: voice-gateway-hermes-failures
-        title: Voice Gateway Hermes failures
+      - uid: voice-gateway-turn-failed
+        title: Voice Gateway turn failed
         condition: C
-        for: 1m
+        noDataState: OK
+        for: 0s
         labels:
           severity: P2
           service: voice-gateway
           device_id: xiaoai-speaker
         annotations:
-          summary: "Hermes calls are failing repeatedly."
+          summary: "A voice turn failed."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md"
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: A
+              expr: "sum(increase(voice_gateway_turn_failure_total[5m])) or vector(0)"
+              instant: true
+              range: false
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: B
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                  type: query
+
+      - uid: voice-gateway-hermes-failed
+        title: Voice Gateway Hermes failed
+        condition: C
+        noDataState: OK
+        for: 0s
+        labels:
+          severity: P2
+          service: voice-gateway
+          device_id: xiaoai-speaker
+        annotations:
+          summary: "A Hermes call failed."
           runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#3-hermes-持续失败"
         data:
           - refId: A
             datasourceUid: prometheus
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: A
-              expr: "increase(voice_gateway_hermes_failure_total[10m])"
+              expr: "sum(increase(voice_gateway_hermes_failure_total[5m])) or vector(0)"
               instant: true
               range: false
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: B
@@ -200,7 +258,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: C
@@ -208,7 +266,7 @@ groups:
               expression: B
               conditions:
                 - evaluator:
-                    params: [2]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -218,32 +276,33 @@ groups:
                     type: last
                   type: query
 
-      - uid: voice-gateway-tts-failures
-        title: Voice Gateway TTS failures
+      - uid: voice-gateway-tts-failed
+        title: Voice Gateway TTS failed
         condition: C
-        for: 1m
+        noDataState: OK
+        for: 0s
         labels:
           severity: P2
           service: voice-gateway
           device_id: xiaoai-speaker
         annotations:
-          summary: "TTS generation is failing repeatedly."
+          summary: "A TTS generation failed."
           runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#4-tts-生成失败"
         data:
           - refId: A
             datasourceUid: prometheus
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: A
-              expr: "increase(voice_gateway_tts_failure_total[10m])"
+              expr: "sum(increase(voice_gateway_tts_failure_total[5m])) or vector(0)"
               instant: true
               range: false
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: B
@@ -253,7 +312,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: C
@@ -261,7 +320,7 @@ groups:
               expression: B
               conditions:
                 - evaluator:
-                    params: [2]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -271,32 +330,33 @@ groups:
                     type: last
                   type: query
 
-      - uid: voice-gateway-playback-failures
-        title: Voice Gateway playback failures
+      - uid: voice-gateway-playback-failed
+        title: Voice Gateway playback failed
         condition: C
-        for: 1m
+        noDataState: OK
+        for: 0s
         labels:
           severity: P2
           service: voice-gateway
           device_id: xiaoai-speaker
         annotations:
-          summary: "Playback commands are failing repeatedly."
+          summary: "A playback command failed."
           runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#5-播放失败"
         data:
           - refId: A
             datasourceUid: prometheus
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: A
-              expr: "increase(voice_gateway_playback_failure_total[10m])"
+              expr: "sum(increase(voice_gateway_playback_failure_total[5m])) or vector(0)"
               instant: true
               range: false
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: B
@@ -306,7 +366,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 600
+              from: 300
               to: 0
             model:
               refId: C
@@ -314,7 +374,7 @@ groups:
               expression: B
               conditions:
                 - evaluator:
-                    params: [2]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -325,31 +385,32 @@ groups:
                   type: query
 
       - uid: voice-gateway-turn-slow
-        title: Voice Gateway turn latency high
+        title: Voice Gateway turn slow
         condition: C
-        for: 3m
+        noDataState: OK
+        for: 0s
         labels:
           severity: P2
           service: voice-gateway
           device_id: xiaoai-speaker
         annotations:
-          summary: "Voice turn p95 latency is above 15 seconds."
+          summary: "A voice turn exceeded 15 seconds."
           runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md"
         data:
           - refId: A
             datasourceUid: prometheus
             relativeTimeRange:
-              from: 900
+              from: 300
               to: 0
             model:
               refId: A
-              expr: "voice_gateway_turn_duration_ms{quantile=\"0.95\"}"
+              expr: "sum(increase(voice_gateway_turn_slow_total[5m])) or vector(0)"
               instant: true
               range: false
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 900
+              from: 300
               to: 0
             model:
               refId: B
@@ -359,7 +420,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 900
+              from: 300
               to: 0
             model:
               refId: C
@@ -367,7 +428,7 @@ groups:
               expression: B
               conditions:
                 - evaluator:
-                    params: [15000]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -377,32 +438,33 @@ groups:
                     type: last
                   type: query
 
-      - uid: voice-gateway-hermes-slow
-        title: Voice Gateway Hermes latency high
+      - uid: voice-gateway-stage-slow
+        title: Voice Gateway stage slow
         condition: C
-        for: 3m
+        noDataState: OK
+        for: 0s
         labels:
           severity: P2
           service: voice-gateway
           device_id: xiaoai-speaker
         annotations:
-          summary: "Hermes p95 latency is above 10 seconds."
-          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md#3-hermes-持续失败"
+          summary: "A single stage exceeded its latency threshold."
+          runbook_url: "voice-gateway/docs/4-ops/07-ops-runbook.md"
         data:
           - refId: A
             datasourceUid: prometheus
             relativeTimeRange:
-              from: 900
+              from: 300
               to: 0
             model:
               refId: A
-              expr: "voice_gateway_turn_stage_duration_ms{stage=\"hermes\",quantile=\"0.95\"}"
+              expr: "sum(increase(voice_gateway_stage_slow_total[5m])) or vector(0)"
               instant: true
               range: false
           - refId: B
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 900
+              from: 300
               to: 0
             model:
               refId: B
@@ -412,7 +474,7 @@ groups:
           - refId: C
             datasourceUid: __expr__
             relativeTimeRange:
-              from: 900
+              from: 300
               to: 0
             model:
               refId: C
@@ -420,7 +482,7 @@ groups:
               expression: B
               conditions:
                 - evaluator:
-                    params: [10000]
+                    params: [0]
                     type: gt
                   operator:
                     type: and
@@ -433,6 +495,7 @@ groups:
       - uid: voice-gateway-event-log-stale
         title: Voice Gateway event log stale
         condition: C
+        noDataState: OK
         for: 2m
         labels:
           severity: P2
@@ -449,7 +512,7 @@ groups:
               to: 0
             model:
               refId: A
-              expr: "voice_gateway_events_total > 0 and voice_gateway_event_log_last_write_age_seconds > 120"
+              expr: "(sum without(event, level) (voice_gateway_events_total) > bool 0) * (voice_gateway_event_log_last_write_age_seconds > bool 120)"
               instant: true
               range: false
           - refId: B

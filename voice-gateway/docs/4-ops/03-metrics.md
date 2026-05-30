@@ -70,6 +70,7 @@ voice_gateway_audio_peak
 voice_gateway_turn_total
 voice_gateway_turn_success_total
 voice_gateway_turn_failure_total
+voice_gateway_turn_slow_total
 voice_gateway_turn_duration_ms
 voice_gateway_turn_stage_duration_ms
 voice_gateway_asr_latency_ms
@@ -77,6 +78,7 @@ voice_gateway_hermes_latency_ms
 voice_gateway_tts_latency_ms
 voice_gateway_playback_latency_ms
 voice_gateway_turn_slowest_stage_count
+voice_gateway_stage_slow_total
 ```
 
 模型和外部依赖指标：
@@ -143,18 +145,35 @@ error.recovered
 
 turn.failed
   -> voice_gateway_turn_failure_total
+  -> voice_gateway_turn_slow_total when total_ms > 15000
   -> voice_gateway_turn_duration_ms from total_ms
   -> voice_gateway_turn_stage_duration_ms from stage_ms
   -> voice_gateway_turn_slowest_stage_count by slowest_stage
 
 turn.completed
   -> voice_gateway_turn_success_total
+  -> voice_gateway_turn_slow_total when total_ms > 15000
   -> voice_gateway_turn_duration_ms from total_ms
   -> voice_gateway_turn_stage_duration_ms from stage_ms
   -> voice_gateway_turn_slowest_stage_count by slowest_stage
 ```
 
 当前 `playback.finished` 代表播放命令被接受并完成当前管理器调用；后续接入真实播放状态后，应区分 `playback.command_accepted` 和 `playback.device_finished`。
+
+单次慢事件也会被转换为计数器，用于个人场景的 Discord 告警：
+
+```text
+hermes.completed latency_ms > 10000
+  -> voice_gateway_stage_slow_total{stage="hermes"}
+
+tts.completed latency_ms > 5000
+  -> voice_gateway_stage_slow_total{stage="tts"}
+
+playback.finished latency_ms > 10000
+  -> voice_gateway_stage_slow_total{stage="playback"}
+```
+
+`voice_gateway_stage_slow_total` 会固定输出 `hermes`、`tts`、`playback` 三个 `stage` 的 0 值。这样“还没有慢事件”会被 Prometheus 明确看成 0，而不是让 Grafana 进入 `DatasourceNoData`。
 
 ## 5. Dashboard
 

@@ -7,16 +7,22 @@
 
 ## 1. 告警原则
 
-告警只为需要人介入的异常发声。家庭语音系统会有自然噪声、偶发空 ASR、短时网络抖动，这些不应该立刻打扰人。
+告警只为需要人介入的异常发声。这个系统目前是个人音箱场景，统计趋势类告警价值不高，默认只关注两类问题：
 
-告警入口采用 Grafana Alerting。第一阶段优先基于 Loki 日志查询触发告警；后续有 `/metrics` 后，再把高频指标型规则迁移到指标查询。
+- 服务功能是否正常：进程、音频流、事件日志、核心 worker、单次 turn/Hermes/TTS/播放失败。
+- 单次性能是否明显异常：一轮完整链路超过阈值，或 Hermes/TTS/播放某个阶段单次超过阈值。
+
+告警入口采用 Grafana Alerting，通过 Prometheus 指标规则触发，再统一发送到 Discord。
 
 规则：
 
-- 对持续异常告警，不对单个失败告警。
+- 不做统计类告警，例如最近 10 分钟失败次数、成功率、p95 延迟、趋势退化。
+- 对单次明确失败告警，方便个人及时知道刚才那次链路是否坏了。
+- 对单次明显慢告警，方便及时定位性能退化。
+- `DatasourceNoData` 不作为业务告警发送到 Discord；单次事件规则没有数据时视为 OK。
 - 对用户可感知失败告警，不对内部自动恢复告警。
 - 每条告警都必须有对应 runbook。
-- 告警内容必须包含设备、时间窗口、症状、最近错误事件和排查入口。
+- 告警内容必须包含设备、症状和排查入口。
 
 ## 2. 分级
 
@@ -35,6 +41,8 @@ P3
 
 ## 3. 告警规则
 
+### 3.1 服务功能类
+
 进程不可用：
 
 ```text
@@ -52,124 +60,115 @@ runbook:
 
 ```text
 condition:
-  voice_gateway_audio_last_seen_age_seconds > 30 for 2m
+  voice_gateway_audio_chunk_total > 0 and voice_gateway_audio_last_seen_age_seconds > 120 for 2m
 severity:
   P1
 message:
   音箱 record stream 超过 2 分钟无音频
 ```
 
-连续 turn 失败：
+runtime worker 单次失败：
 
 ```text
 condition:
-  increase(voice_gateway_turn_failure_total[10m]) >= 3
+  sum(increase(voice_gateway_runtime_worker_failure_total[5m])) > 0
 severity:
-  P2
+  P1
 message:
-  最近 10 分钟连续语音请求失败
+  voice-gateway 后台 worker 失败
 ```
 
-Hermes 持续失败：
+单次 turn 失败：
 
 ```text
 condition:
-  increase(voice_gateway_hermes_failure_total[10m]) >= 3
+  sum(increase(voice_gateway_turn_failure_total[5m])) > 0
 severity:
   P2
 message:
-  Hermes 调用持续失败
+  本次语音请求失败
 ```
 
-TTS 持续失败：
+Hermes 单次失败：
 
 ```text
 condition:
-  increase(voice_gateway_tts_failure_total[10m]) >= 3
+  sum(increase(voice_gateway_hermes_failure_total[5m])) > 0
 severity:
   P2
 message:
-  TTS 生成持续失败
+  Hermes 调用失败
 ```
 
-播放失败：
+TTS 单次失败：
 
 ```text
 condition:
-  increase(voice_gateway_playback_failure_total[10m]) >= 3
+  sum(increase(voice_gateway_tts_failure_total[5m])) > 0
 severity:
   P2
 message:
-  音箱播放命令持续失败
+  TTS 生成失败
 ```
 
-端到端延迟过高：
+播放单次失败：
 
 ```text
 condition:
-  p95(voice_gateway_turn_duration_ms[15m]) > 15000
+  sum(increase(voice_gateway_playback_failure_total[5m])) > 0
 severity:
   P2
 message:
-  语音请求 p95 延迟超过 15 秒
-```
-
-单阶段持续变慢：
-
-```text
-condition:
-  p95(voice_gateway_turn_stage_duration_ms{stage="hermes"}[15m]) > 10000
-severity:
-  P2
-message:
-  Hermes 阶段 p95 延迟超过 10 秒
+  音箱播放命令失败
 ```
 
 日志停写：
 
 ```text
 condition:
-  voice_gateway_event_log_last_write_age_seconds > 120
+  event log age bool result > 0 for 2m
 severity:
   P2
 message:
   事件日志超过 2 分钟没有更新
 ```
 
-磁盘空间不足：
+### 3.2 单次性能类
+
+端到端单次过慢：
 
 ```text
 condition:
-  disk_free_percent < 10
+  sum(increase(voice_gateway_turn_slow_total[5m])) > 0
 severity:
   P2
 message:
-  Mac Mini 日志或音频输出磁盘空间不足
+  单次语音请求超过 15 秒
 ```
 
-日志型规则示例：
+单阶段单次过慢：
 
-```logql
-count_over_time({service="voice-gateway", log_type="events"} | json | event="runtime.worker.failed" [5m]) > 0
+```text
+condition:
+  sum(increase(voice_gateway_stage_slow_total[5m])) > 0
+severity:
+  P2
+message:
+  Hermes/TTS/播放某个阶段单次超过阈值
 ```
 
-```logql
-count_over_time({service="voice-gateway", log_type="events"} | json | event="hermes.failed" [10m]) >= 3
+阶段慢阈值：
+
+```text
+turn total > 15000ms
+hermes > 10000ms
+tts > 5000ms
+playback > 10000ms
 ```
 
-```logql
-count_over_time({service="voice-gateway", log_type="events"} | json | event="playback.failed" [10m]) >= 3
-```
+Dashboard 可以继续保留成功率、p50/p95、失败趋势等统计面板用于观察，但这些统计面板默认不触发 Discord。
 
-```logql
-count_over_time({service="voice-gateway", log_type="runtime"} |= "record stream bytes_total=" [2m]) == 0
-```
-
-慢请求规则示例：
-
-```logql
-count_over_time({service="voice-gateway", log_type="events"} | json | event=~"turn\\.(completed|failed)" | total_ms > 15000 [10m]) >= 3
-```
+这里的 `[5m]` 只是为了让 Prometheus 在当前 scrape/remote_write 节奏下有足够样本计算 `increase()`；业务语义仍然是“最近 5 分钟内出现过一次明确失败或一次明显变慢”，不是统计趋势告警。
 
 运维栈自身也需要告警：
 

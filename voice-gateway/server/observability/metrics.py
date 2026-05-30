@@ -6,6 +6,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 
 
+TURN_SLOW_THRESHOLD_MS = 15_000
+STAGE_SLOW_THRESHOLDS_MS = {
+    "hermes": 10_000,
+    "tts": 5_000,
+    "playback": 10_000,
+}
+
+
 class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -14,8 +22,10 @@ class MetricsRegistry:
         self.turn_total = 0
         self.turn_success_total = 0
         self.turn_failure_total = 0
+        self.turn_slow_total = 0
         self.turn_duration_ms: list[int] = []
         self.stage_duration_ms: dict[str, list[int]] = {}
+        self.stage_slow_total: dict[str, int] = {}
         self.slowest_stage_count: dict[str, int] = {}
         self.audio_bytes_total = 0
         self.audio_chunk_total = 0
@@ -44,19 +54,26 @@ class MetricsRegistry:
                 self.asr_empty_total += 1
             elif event == "hermes.failed":
                 self.hermes_failure_total += 1
+            elif event == "hermes.completed":
+                self._observe_stage_latency("hermes", fields.get("latency_ms"))
             elif event == "tts.failed":
                 self.tts_failure_total += 1
             elif event == "tts.completed":
                 latency_ms = fields.get("latency_ms")
                 if isinstance(latency_ms, int):
                     self.tts_latency_ms.append(latency_ms)
+                self._observe_stage_latency("tts", latency_ms)
             elif event == "playback.failed":
                 self.playback_failure_total += 1
+            elif event == "playback.finished":
+                self._observe_stage_latency("playback", fields.get("latency_ms"))
             elif event in {"turn.completed", "turn.failed"}:
                 self.turn_total += 1
                 total_ms = fields.get("total_ms")
                 if isinstance(total_ms, int):
                     self.turn_duration_ms.append(total_ms)
+                    if total_ms > TURN_SLOW_THRESHOLD_MS:
+                        self.turn_slow_total += 1
                 stage_ms = fields.get("stage_ms")
                 if isinstance(stage_ms, dict):
                     for stage, value in stage_ms.items():
@@ -69,6 +86,13 @@ class MetricsRegistry:
                     self.turn_success_total += 1
                 else:
                     self.turn_failure_total += 1
+
+    def _observe_stage_latency(self, stage: str, latency_ms: Any) -> None:
+        threshold_ms = STAGE_SLOW_THRESHOLDS_MS.get(stage)
+        if threshold_ms is None or not isinstance(latency_ms, int):
+            return
+        if latency_ms > threshold_ms:
+            self.stage_slow_total[stage] = self.stage_slow_total.get(stage, 0) + 1
 
     def render_prometheus(self) -> str:
         with self._lock:
@@ -100,6 +124,9 @@ class MetricsRegistry:
                 "# HELP voice_gateway_turn_failure_total Failed turns.",
                 "# TYPE voice_gateway_turn_failure_total counter",
                 f"voice_gateway_turn_failure_total {self.turn_failure_total}",
+                "# HELP voice_gateway_turn_slow_total Single turns slower than the alert threshold.",
+                "# TYPE voice_gateway_turn_slow_total counter",
+                f"voice_gateway_turn_slow_total {self.turn_slow_total}",
                 "# HELP voice_gateway_runtime_worker_failure_total Runtime worker failures.",
                 "# TYPE voice_gateway_runtime_worker_failure_total counter",
                 f"voice_gateway_runtime_worker_failure_total {self.runtime_worker_failure_total}",
@@ -124,6 +151,11 @@ class MetricsRegistry:
             lines.append("# TYPE voice_gateway_turn_slowest_stage_count counter")
             for stage, count in sorted(self.slowest_stage_count.items()):
                 lines.append(f'voice_gateway_turn_slowest_stage_count{{stage="{_escape(stage)}"}} {count}')
+            lines.append("# HELP voice_gateway_stage_slow_total Single stages slower than the alert threshold.")
+            lines.append("# TYPE voice_gateway_stage_slow_total counter")
+            for stage in sorted(STAGE_SLOW_THRESHOLDS_MS):
+                count = self.stage_slow_total.get(stage, 0)
+                lines.append(f'voice_gateway_stage_slow_total{{stage="{_escape(stage)}"}} {count}')
             lines.append("# HELP voice_gateway_events_total Structured events by event and level.")
             lines.append("# TYPE voice_gateway_events_total counter")
             for (event, level), count in sorted(self.events_total.items()):

@@ -120,6 +120,39 @@ def test_metrics_registry_tracks_turn_summary():
     assert 'voice_gateway_turn_slowest_stage_count{stage="hermes"} 1' in rendered
 
 
+def test_metrics_registry_preinitializes_stage_slow_series():
+    metrics = MetricsRegistry()
+
+    rendered = metrics.render_prometheus()
+
+    assert 'voice_gateway_stage_slow_total{stage="hermes"} 0' in rendered
+    assert 'voice_gateway_stage_slow_total{stage="tts"} 0' in rendered
+    assert 'voice_gateway_stage_slow_total{stage="playback"} 0' in rendered
+
+
+def test_metrics_registry_tracks_single_slow_events():
+    metrics = MetricsRegistry()
+
+    metrics.observe_event(
+        "turn.completed",
+        {
+            "level": "info",
+            "total_ms": 16000,
+            "stage_ms": {"asr": 100, "hermes": 12000},
+            "slowest_stage": "hermes",
+        },
+    )
+    metrics.observe_event("hermes.completed", {"level": "info", "latency_ms": 10001})
+    metrics.observe_event("tts.completed", {"level": "info", "latency_ms": 5001})
+    metrics.observe_event("playback.finished", {"level": "info", "latency_ms": 10001})
+
+    rendered = metrics.render_prometheus()
+    assert "voice_gateway_turn_slow_total 1" in rendered
+    assert 'voice_gateway_stage_slow_total{stage="hermes"} 1' in rendered
+    assert 'voice_gateway_stage_slow_total{stage="tts"} 1' in rendered
+    assert 'voice_gateway_stage_slow_total{stage="playback"} 1' in rendered
+
+
 def test_metrics_registry_tracks_tts_latency():
     metrics = MetricsRegistry()
 
