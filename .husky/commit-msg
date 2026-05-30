@@ -1,0 +1,3 @@
+if [ -x .githooks/commit-msg ]; then
+  .githooks/commit-msg "$@"
+fi

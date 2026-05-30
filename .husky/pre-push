@@ -1,0 +1,3 @@
+if [ -x .githooks/pre-push ]; then
+  .githooks/pre-push "$@"
+fi

@@ -1,11 +1,12 @@
 # Git Hooks
 
-This repository keeps shareable Git hooks in `.githooks/`.
+This repository runs shareable Git hooks through Husky in `.husky/`.
+The Husky hooks also call the legacy guard scripts in `.githooks/`.
 
 Enable them once per clone:
 
 ```sh
-scripts/setup-git-hooks.sh
+npm install
 ```
 
 ## Commit Message

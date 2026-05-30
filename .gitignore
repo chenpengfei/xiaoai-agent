@@ -220,6 +220,9 @@ __marimo__/
 # Local OS/editor noise
 .DS_Store
 
+# Node tooling for Git hooks
+node_modules/
+
 # Logs and runtime output
 logs/
 *.log
